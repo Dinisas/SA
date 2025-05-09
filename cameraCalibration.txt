@@ -1,0 +1,9 @@
+distortion in images introduced by uncalibrated cameras:
+
+radial distortion -> causes straight lines to appear curved. Radial distortion becomes larger the farther points are from the center of the image.
+
+tangential distortion -> occurs because the image-taking lense is not aligned perfectly parallel to the imaging plane. So, some areas in the image may look nearer than expected
+
+camera calibration consists in determining the external parameters (rotation (R 3x3 matrix), translation (T, 3x1 matrix) -> position and orientation of the camera with respect to the real world) and the intrinsic parameters (focal length (f), distortion (parameters/coefficients k and p), principal point (cx,cy -> center of the image)). With this parameters we know the projection matrix in full, which is unique to a specific camera
+
+matematica explicada no remarkable.
