@@ -1,0 +1,29 @@
+<launch>
+  <!-- Start the USB camera -->
+  <node name="usb_cam" pkg="usb_cam" type="usb_cam_node" output="screen">
+    <param name="video_device" value="/dev/video0" />
+    <param name="image_width" value="640" />
+    <param name="image_height" value="480" />
+    <param name="pixel_format" value="yuyv" />
+    <param name="camera_frame_id" value="camera_link" />
+    <param name="camera_name" value="camera" />
+    <param name="io_method" value="mmap"/>
+    <param name="framerate" value="30" />
+    <param name="auto_focus" value="false" />
+  </node>
+  
+  <!-- Publish a static transform from base_link to camera -->
+  <node pkg="tf" type="static_transform_publisher" name="camera_base_broadcaster"
+        args="0.073 -0.011 0.084 0 0 0 base_link camera_link 100" />
+  
+  <!-- Compress the image to reduce rosbag size -->
+  <node name="republish" pkg="image_transport" type="republish" 
+        args="raw in:=/usb_cam/image_raw compressed out:=/camera/image_raw" />
+  
+  <!-- Start rosbag record with synchronized odometry and camera data -->
+  <node pkg="rosbag" type="record" name="rosbag_recorder" output="screen"
+        args="-o $(find pioneer_fast_slam)/src/rosbag/slam_data 
+              /pose 
+              /camera/image_raw/compressed 
+              /tf" />
+</launch>

@@ -35,3 +35,15 @@
 /home/dinisas/SA/catkin_ws/build/gtest/googletest/CMakeFiles/test.dir
 /home/dinisas/SA/catkin_ws/build/gtest/googletest/CMakeFiles/gtest_main.dir
 /home/dinisas/SA/catkin_ws/build/gtest/googletest/CMakeFiles/gtest.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/install/strip.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/install/local.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/edit_cache.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/test.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/std_msgs_generate_messages_py.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/std_msgs_generate_messages_nodejs.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/std_msgs_generate_messages_lisp.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/std_msgs_generate_messages_eus.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/install.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/list_install_components.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/rebuild_cache.dir
+/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/CMakeFiles/std_msgs_generate_messages_cpp.dir

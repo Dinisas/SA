@@ -1,0 +1,9 @@
+On the Robot (Pioneer / RPi) terminal(s):
+export ROS_MASTER_URI=http://192.168.28.20:11311   # Robot's own IP here
+export ROS_IP=192.168.28.20                        # Robot’s IP again here
+# Do NOT set ROS_HOSTNAME here to avoid confusion
+
+On your Laptop / Lab computer terminal(s):
+export ROS_MASTER_URI=http://192.168.28.20:11311  # Robot’s IP as ROS Master URI
+export ROS_IP=192.168.28.50                        # Your Laptop’s own IP here
+# Again, avoid setting ROS_HOSTNAME unless you have proper DNS

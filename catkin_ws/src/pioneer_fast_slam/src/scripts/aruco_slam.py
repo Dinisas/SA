@@ -1,5 +1,11 @@
+#!/usr/bin/env python3
+# Import necessary libraries
 import rospy
+import subprocess
+import argparse
+import os
 import cv2
+import cv2.aruco as aruco
 import numpy as np
 import threading
 import tf
@@ -7,109 +13,201 @@ from geometry_msgs.msg import TransformStamped
 from sensor_msgs.msg import CompressedImage
 from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
+import re
+import pygame
 from visualization_msgs.msg import Marker, MarkerArray
-from img_callback import image_callback
-from callbacks import odom_callback
-import FastSlam  # You'll need to implement or adapt this
+from utils import get_rosbag_duration, cart2pol, transform_camera_to_robot
+from fast_slam import FastSlam
 
-class ArucoSlam:
-    def __init__(self):
-        rospy.init_node('aruco_detector_node')
-        rospy.loginfo('ArUco Detector Node Started')
-        
-        self.marker_size = rospy.get_param('~marker_size', 0.16)
-        self.bridge = CvBridge()
+class ArucoSLAM:
+    def __init__(self, rosbag_time, slam_variables):
+        # Initialize instance variables and set up ROS node
+        self.k = rosbag_time + 5
         self.tf_broadcaster = tf.TransformBroadcaster()
+        self.calibrate_camera()  # Camera calibration
+        self.lock = threading.Lock()
         
-        # Publishers
-        self.landmark_pub = rospy.Publisher('/aruco_landmarks', MarkerArray, queue_size=10)
-        self.aruco_info_pub = rospy.Publisher('/aruco_info', Float64MultiArray, queue_size=10)
+        rospy.loginfo('ArucoSLAM Node Started')
+        rospy.init_node('aruco_slam')  # Initialize the ROS node
         
-        # Camera calibration
-        self.calibrate_camera()
-        
-        # ArUco dictionary setup
-        try:
-            self.aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_250)
-        except:
-            self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_250) 
+        # Create SLAM object
+        window_size_pixel, size_m, number_particles, tunning_options = slam_variables
+        self.create_slam(window_size_pixel, size_m, tunning_options, number_particles)
 
-        # ArUco parameters setup
+        # Subscribe to relevant ROS topics
+        self.image_sub = rospy.Subscriber("/camera/image/compressed", CompressedImage, self.image_callback)
+        self.odom_sub = rospy.Subscriber("/pose", Odometry, self.odom_callback)
+        self.landmark_pub = rospy.Publisher('/landmarks', MarkerArray, queue_size=10)
+        self.current_aruco = []  
+        self.odom = [0,0,0]
+        self.bridge = CvBridge()  # Initialize the CvBridge object
+
+        # Load ArUco dictionary
         try:
-            self.parameters = cv2.aruco.DetectorParameters_create()
+            self.aruco_dict = aruco.Dictionary_get(aruco.DICT_5X5_100)
         except:
+            self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_100) 
+
+        # Create ArUco detector parameters
+        try:
+            self.parameters = aruco.DetectorParameters_create()
+        except:  # For different versions of OpenCV
             self.parameters = cv2.aruco.DetectorParameters()
-            
-        # Landmark angle cache
         self.dict = {}
-        
-        # Subscribe to camera topic
-        self.image_sub = rospy.Subscriber("/camera/image/compressed", 
-                                        CompressedImage, 
-                                        self.image_callback)
-    
-    #camera calibration instrinsic parameters
+        self.map = {}
+        self.count = 0
+        self.tara = None
+
+    # Create SLAM object
+    def create_slam(self, window_size_pixel, size_m, tunning_options, number_particles):
+        pioneer_L = 0.33  # Pioneer P3-DX wheelbase (check your specific model)
+        self.my_slam = FastSlam(tunning_options, window_size_pixel, size_m, pioneer_L, number_particles)
+
+    # Callback function for odometry data
+    def odom_callback(self, odom_data):
+        with self.lock:  # Ensure thread-safe operation with a lock
+            # Extract position and orientation from odometry data
+            x = odom_data.pose.pose.position.x
+            y = odom_data.pose.pose.position.y
+            xq = odom_data.pose.pose.orientation.x
+            yq = odom_data.pose.pose.orientation.y
+            zq = odom_data.pose.pose.orientation.z
+            wq = odom_data.pose.pose.orientation.w
+            quater = [xq, yq, zq, wq]
+            
+            # Update the odometry information
+            self.odom = [x, y, quater]
+            
+            # Initialize reference (tara) position on the first callback
+            if self.count == 0:
+                self.tara = [x, y, quater]
+                self.count += 1
+
+            # Adjust odometry based on the initial reference position
+            self.odom[0] -= self.tara[0]
+            self.odom[1] -= self.tara[1]
+            
+            # Update SLAM with the new odometry information
+            self.my_slam.update_odometry(self.odom)
+
+    # Callback function for image data
+    def image_callback(self, data):
+        with self.lock:  # Ensure thread-safe operation with a lock
+            self.current_aruco = []
+
+            try:
+                # Convert compressed image message to OpenCV format
+                cv_image = self.bridge.compressed_imgmsg_to_cv2(data, "bgr8")
+            except Exception as e:
+                rospy.logerr("CvBridge Error: {0}".format(e))
+                return
+
+            # Convert the image to grayscale
+            gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+            # Detect ArUco markers in the image
+            corners, ids, rejectedImgPoints = aruco.detectMarkers(gray, self.aruco_dict, parameters=self.parameters)
+            if ids is not None and len(ids) > 0:
+                for i in range(len(ids)):
+                    marker_corners = corners[i][0]
+                    # Draw bounding box around detected markers
+                    cv2.polylines(cv_image, [np.int32(marker_corners)], True, (0, 255, 0), 2)
+                    # Estimate pose of each marker
+                    _, tvec, _ = cv2.aruco.estimatePoseSingleMarkers(corners[i], 0.25, self.camera_matrix, self.dist_coeffs)
+
+                    # Draw a circle at the center of the image (for reference)
+                    cv2.circle(cv_image, (320, 240), radius=10, color=(255, 0, 0), thickness=-1)
+
+                    # Transform the translation vector to robot coordinates
+                    tvec = transform_camera_to_robot(tvec[0][0])
+                    # Convert Cartesian coordinates to polar coordinates
+                    dist, phi = cart2pol(tvec[0], tvec[2])
+
+                    # Fill the dictionary if the marker is detected
+                    if ids[i][0] not in self.dict:
+                        self.dict[ids[i][0]] = []
+                    self.dict[ids[i][0]].append(phi)
+                    
+                    # Display the distance to the marker
+                    cv2.putText(cv_image, 'dist= ' + str(round(dist, 3)), 
+                                (int(marker_corners[2][0] - 80), int(marker_corners[2][1]) + 45), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
+                    # Compute median of the last few measurements to reduce noise
+                    if len(self.dict[ids[i][0]]) >= 3:                
+                        phi5 = -np.median(np.sort(self.dict[ids[i][0]][-4:-1]))  # Compute median
+                        self.dict[ids[i][0]].pop(0)  # Remove the oldest measurement
+                        cv2.putText(cv_image, 'ang=' + str(round(phi5, 3)), 
+                                    (int(marker_corners[1][0] - 70), int(marker_corners[1][1]) - 10), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
+                        self.current_aruco.append((dist, phi5, ids[i][0]))
+                    else:
+                        self.current_aruco.append((dist, -phi, ids[i][0]))
+
+            # Compute SLAM with the detected ArUco markers
+            self.my_slam.compute_slam(self.current_aruco)
+            # Show the image with detected markers
+            cv2.imshow('Aruco Detection', cv_image)
+            cv2.waitKey(3)
+
+    # Calibrate the camera
     def calibrate_camera(self):
-        #get camera calibration matrix (intrsic parameters, ex: focal length, principal point)
+        try:
+            data = np.load("camera_calibration.npz")
+            self.camera_matrix = data['camera_matrix']
+            self.dist_coeffs = data['dist_coeffs']
+            print("Calibration loaded successfully!")
+        except Exception as e:
+            print(f"Error loading calibration: {e}")
+            print("Please check if the calibration file exists at the specified path.")
+            exit(1)
 
-        #values from camera calibration
-        dist = [0.1639958233797625, -0.271840030972792, 0.001055841660100477, -0.00166555973740089, 0.0]
-        K = [322.0704122808738, 0.0, 199.2680620421962, 0.0, 320.8673986158544, 155.2533082600705, 0.0, 0.0, 1.0]
-        
-        # Adjust for standard image dimensions
-        K[2] = 320  # Principal point x
-        K[5] = 240  # Principal point y
-        
-        mtx = np.array(K).reshape(3, 3)
-        dist = np.array(dist).reshape(1, 5)
-        self.camera_matrix = mtx.astype(float)
-        self.dist_coeffs = dist.astype(float)
-    
-    def image_callback_wrapper(self, data):
-        image_callback(self, data)
-    
-    def odom_callback_wrapper(self, data):
-        odom_callback(self, data)
-
+    # Publish transformation frames
     def publish_tf(self):
-        """Publish TF frames for visualization"""
-        # Broadcast map to odom (fixed transform)
-        self.tf_broadcaster.sendTransform(
+        # Broadcast map to odom
+        br = tf.TransformBroadcaster()
+        br.sendTransform(
             (0.0, 0.0, 0.0),
             tf.transformations.quaternion_from_euler(0, 0, 0),
             rospy.Time.now(),
             "odom",
             "map"
         )
-        
+
         # Get best particle and broadcast odom to base_link
         best_particle = self.my_slam.get_best_particle()
-        x, y, theta = best_particle.pose
-        quaternion = tf.transformations.quaternion_from_euler(0, 0, theta)
-        self.tf_broadcaster.sendTransform(
-            (x, y, 0),
+        x, y, theta = best_particle.pose  # Access the pose property correctly
+        quaternion = tf.transformations.quaternion_from_euler(0, 0, theta - (np.pi))
+        br.sendTransform(
+            (-x, y, 0),
             quaternion,
             rospy.Time.now(),
             "base_link",
             "odom"
         )
 
+    # Main loop to run the node
     def run(self):
-        """Main execution loop"""
-        rate = rospy.Rate(10)  # 10 Hz
-        while not rospy.is_shutdown():
-            self.publish_tf()
+        start_time = rospy.Time.now()
+        while not rospy.is_shutdown():  # Continue running until ROS node is shutdown
+            self.publish_tf()  # Publish transformation frames
             self.my_slam.publish_landmarks()
-            rate.sleep()
-        
-        # Clean up
-        cv2.destroyAllWindows()
+            if self.rosbag_finished(start_time, self.k):  # Check if the rosbag playback has finished
+                rospy.loginfo("Rosbag playback finished. Shutting down...")
+                rospy.signal_shutdown("Rosbag playback finished")  # Shutdown ROS node
+                break  # Exit the loop
+            rospy.sleep(0.1)  # Process ROS callbacks once
+        cv2.destroyAllWindows()  # Close OpenCV windows when node exits
+        pygame.display.quit()
+        pygame.quit()
 
-if __name__=="__main__":
-    try:
-        # run ArucoSlam node
-        node=ArucoSlam()
-        node.run()
-    except rospy.ROSInterruptException:
-        #stop running in case of ctrl+c or node is shutdown
-        pass
+    # Check if the rosbag playback has finished
+    def rosbag_finished(self, start_time, duration):
+        end_time = start_time + rospy.Duration.from_sec(duration)
+        if rospy.Time.now() > end_time:
+            return True  # Playback finished
+        else:
+            return False  # Playback ongoing
+
+    # Get the trajectory from the SLAM object
+    def get_trajectory(self):
+        return self.my_slam.get_best_trajectory()

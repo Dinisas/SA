@@ -1,0 +1,8 @@
+prefix=/home/dinisas/SA/catkin_ws/install
+
+Name: pioneer_fast_slam
+Description: Description of pioneer_fast_slam
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

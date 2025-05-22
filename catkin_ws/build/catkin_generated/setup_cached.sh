@@ -8,6 +8,7 @@
 
 # modified environment variables
 export CMAKE_PREFIX_PATH="/home/dinisas/SA/catkin_ws/devel:$CMAKE_PREFIX_PATH"
+export LD_LIBRARY_PATH="/home/dinisas/SA/catkin_ws/devel/lib:$LD_LIBRARY_PATH"
 export PWD='/home/dinisas/SA/catkin_ws/build'
 export ROSLISP_PACKAGE_DIRECTORIES='/home/dinisas/SA/catkin_ws/devel/share/common-lisp'
 export ROS_PACKAGE_PATH="/home/dinisas/SA/catkin_ws/src:$ROS_PACKAGE_PATH"
