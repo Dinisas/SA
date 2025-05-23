@@ -1,0 +1,9 @@
+# ignore rosbag folder
+catkin_ws/src/pioneer_fast_slam/src/rosbag/
+
+bashrc_commands.txt
+cameraCalibration.txt
+fastSlam.pdf
+fastSlam.pptx
+fastSlam.txt
+fastSlam_script.pdf

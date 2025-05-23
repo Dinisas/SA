@@ -2,7 +2,7 @@ prefix=/home/dinisas/SA/catkin_ws/devel
 
 Name: pioneer_fast_slam
 Description: Description of pioneer_fast_slam
-Version: 0.0.0
+Version: 0.1.0
 Cflags: 
 Libs: -L${prefix}/lib 
-Requires: 
+Requires: rospy std_msgs geometry_msgs sensor_msgs nav_msgs visualization_msgs tf
