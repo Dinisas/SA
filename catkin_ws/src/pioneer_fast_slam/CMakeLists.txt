@@ -12,8 +12,6 @@ find_package(catkin REQUIRED COMPONENTS
   tf
 )
 
-catkin_python_setup()
-
 ## Declare a catkin package
 catkin_package(
   CATKIN_DEPENDS 
@@ -31,16 +29,39 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
-## Install Python scripts
-catkin_install_python(PROGRAMS
-  src/scripts/main.py
-  src/scripts/aruco_slam.py
-  src/scripts/fast_slam.py
-  src/scripts/particle.py
-  src/scripts/landmark.py
-  src/scripts/utils.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
+## DEVELOPMENT: Create symlinks instead of wrapper scripts
+# This preserves Python imports between modules
+set(SCRIPTS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/scripts)
+set(DEVEL_SCRIPTS_DIR ${CATKIN_DEVEL_PREFIX}/${CATKIN_PACKAGE_BIN_DESTINATION})
+
+# Create the directory
+file(MAKE_DIRECTORY ${DEVEL_SCRIPTS_DIR})
+
+# Create symlinks for each Python script
+foreach(script 
+    main.py 
+    aruco_slam.py 
+    fast_slam.py 
+    particle.py 
+    landmark.py 
+    utils.py)
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+    ${SCRIPTS_DIR}/${script}
+    ${DEVEL_SCRIPTS_DIR}/${script}
+  )
+endforeach()
+
+## DEPLOYMENT ONLY: Uncomment this when you need to install
+# catkin_install_python(PROGRAMS
+#   src/scripts/main.py
+#   src/scripts/aruco_slam.py
+#   src/scripts/fast_slam.py
+#   src/scripts/particle.py
+#   src/scripts/landmark.py
+#   src/scripts/utils.py
+#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+# )
 
 ## Install launch files
 install(DIRECTORY src/launch/

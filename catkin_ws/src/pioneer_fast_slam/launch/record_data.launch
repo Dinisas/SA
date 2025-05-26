@@ -1,6 +1,7 @@
 <launch>
   <!-- Start the USB camera -->
   <node name="usb_cam" pkg="usb_cam" type="usb_cam_node" output="screen">
+   <!-- mudamos esta linha no launch da mafalda para meter a camera a funcionar -->
     <param name="video_device" value="/dev/video0" />
     <param name="image_width" value="640" />
     <param name="image_height" value="480" />
@@ -14,7 +15,7 @@
   
   <!-- Publish a static transform from base_link to camera -->
   <node pkg="tf" type="static_transform_publisher" name="camera_base_broadcaster"
-        args="0.073 -0.011 0.084 0 0 0 base_link camera_link 100" />
+       args="0.10 0.0 0.215 0 0 0 base_link camera_link 100"/>
   
   <!-- Compress the image to reduce rosbag size -->
   <node name="republish" pkg="image_transport" type="republish" 

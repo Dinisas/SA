@@ -1,0 +1,36 @@
+<launch>
+  <!-- Arguments -->
+  <!-- define command line arguments -->
+  <arg name="rosbag" default="simulation1.bag" doc="Rosbag file to use for playback"/>
+  <arg name="rviz" default="true" doc="Set to false to not launch rviz"/>
+  <arg name="particles" default="25" doc="Number of particles for fast Slam Algorithm"/>
+  
+  <!-- Main ArucoSLAM Node -->
+  <!-- starts main ArucoSlam Node (calls it aruco_slam in ros), uses package pioneer_fast_slam, runs main.py script -->
+  <node pkg="pioneer_fast_slam" type="main.py" name="start" output="screen">
+      <!-- passes the rosbag filename and number of particles to python script -->
+     <param name="~rosbag" value="$(arg rosbag)"/>
+     <param name="~particles" value="$(arg particles)"/>
+  </node>
+  
+  <!-- Play the specified rosbag file -->
+  <!-- plays rosbag with sincronization, dynamically finds rosbagp pathplays rosbag with sincronization, dynamically finds rosbagp path -->
+  <node pkg="rosbag" type="play" name="rosbag_play" 
+        args="--clock $(find pioneer_fast_slam)/src/rosbag/$(arg rosbag)"/>
+  
+  <!-- Use TF static publisher for camera to base transform -->
+  <!-- x, y, z, roll, pitch, yawn, parent, child, rate -->
+  <node pkg="tf" type="static_transform_publisher" name="camera_base_broadcaster"
+      args="0.10 0.0 0.215 0 0 0 base_link camera_link 100"/>
+  
+  <!-- RViz for visualization -->
+  <!-- to not run rviz right add rviz:=false to running command (starts rviz with custom config file slam.rviz)-->
+   <!-- <group if="$(arg rviz)">
+    <node pkg="rviz" type="rviz" name="rviz" 
+          args="-d $(find pioneer_fast_slam)/src/rviz/slam.rviz"/>
+  </group> -->
+
+  <!-- Set up time synchronization -->
+  <!-- makes all nodes use timestamps from the rosbag, ensures proper synchronization of recorded data -->
+  <param name="/use_sim_time" value="true"/>
+</launch>

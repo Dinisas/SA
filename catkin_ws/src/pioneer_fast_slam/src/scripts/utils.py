@@ -8,7 +8,7 @@ import subprocess
 # Convert Cartesian coordinates to polar coordinates
 def cart2pol(x, y):
     rho = np.sqrt(x**2 + y**2)  # Compute the radius
-    phi = np.arctan2(x, y)  # Compute the angle
+    phi = np.arctan2(x,y)  # Compute the angle (might need to be y,x or x,y)
     return(rho, np.degrees(phi))  # Return radius and angle in degrees
     
 # Get the duration of a rosbag file using the rosbag info command
@@ -49,10 +49,15 @@ def normalize_weights(particles, num_particles):
 
 # Low variance resampling method
 def low_variance_resampling(weights, equal_weights, Num_particles):
+    # cumulative sum of particle weights
     wcum = np.cumsum(weights)
+    # Creates evenly spaced sampling points, offset by -1/N
     base = np.cumsum(equal_weights) - 1 / Num_particles
+    # Adds a small random offset (0 to 1/N) to each systematic sampling point
     resampleid = base + np.random.rand(base.shape[0]) / Num_particles
+    # Creates an array to store which particle indices are selected
     indices = np.zeros(Num_particles, dtype=int)
+    # Initializes a pointer to track position in the cumulative weight array
     j = 0
     # This will select which particles to keep. The total number of particles stays the same. 
     # If one is not selected, another should be selected twice.
@@ -146,7 +151,7 @@ def transform_camera_to_robot(translation_vector):
         [0, 0, 1]
     ])
     # Translation vector from camera to robot frame
-    T_cam_to_robot = np.array([0.076, 0, 0.103])  
+    T_cam_to_robot = np.array([0.10, 0.0, 0.215]) 
 
     # Convert translation_vector to homogeneous coordinates
     translation_vector_hom = np.append(translation_vector, [1])

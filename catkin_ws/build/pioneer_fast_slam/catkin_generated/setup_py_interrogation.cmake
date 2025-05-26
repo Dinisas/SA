@@ -1,7 +1,0 @@
-set(pioneer_fast_slam_SETUP_PY_SETUP_MODULE "setuptools")
-set(pioneer_fast_slam_SETUP_PY_VERSION "0.1.0")
-set(pioneer_fast_slam_SETUP_PY_SCRIPTS "")
-set(pioneer_fast_slam_SETUP_PY_PACKAGES "pioneer_fast_slam")
-set(pioneer_fast_slam_SETUP_PY_PACKAGE_DIRS "src/scripts/pioneer_fast_slam")
-set(pioneer_fast_slam_SETUP_PY_MODULES "")
-set(pioneer_fast_slam_SETUP_PY_MODULE_DIRS "")

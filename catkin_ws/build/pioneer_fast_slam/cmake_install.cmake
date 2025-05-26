@@ -38,10 +38,6 @@ if(NOT DEFINED CMAKE_CROSSCOMPILING)
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  include("/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/safe_execute_install.cmake")
-endif()
-
-if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
   file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig" TYPE FILE FILES "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/pioneer_fast_slam.pc")
 endif()
 
@@ -54,30 +50,6 @@ endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
   file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam" TYPE FILE FILES "/home/dinisas/SA/catkin_ws/src/pioneer_fast_slam/package.xml")
-endif()
-
-if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pioneer_fast_slam" TYPE PROGRAM FILES "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/main.py")
-endif()
-
-if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pioneer_fast_slam" TYPE PROGRAM FILES "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/aruco_slam.py")
-endif()
-
-if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pioneer_fast_slam" TYPE PROGRAM FILES "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/fast_slam.py")
-endif()
-
-if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pioneer_fast_slam" TYPE PROGRAM FILES "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/particle.py")
-endif()
-
-if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pioneer_fast_slam" TYPE PROGRAM FILES "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/landmark.py")
-endif()
-
-if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pioneer_fast_slam" TYPE PROGRAM FILES "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/utils.py")
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)

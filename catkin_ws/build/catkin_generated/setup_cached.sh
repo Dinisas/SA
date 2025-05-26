@@ -7,5 +7,6 @@
 # new environment variables
 
 # modified environment variables
+export LD_LIBRARY_PATH='/opt/ros/noetic/lib'
+export PKG_CONFIG_PATH='/opt/ros/noetic/lib/pkgconfig'
 export PWD='/home/dinisas/SA/catkin_ws/build'
-export PYTHONPATH="/home/dinisas/SA/catkin_ws/devel/lib/python3/dist-packages:$PYTHONPATH"
