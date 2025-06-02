@@ -10,20 +10,24 @@ import traceback
 import sys
 
 # Function to set SLAM variables
-def set_slam_variables(particles):
+def set_slam_variables(particles, groundtruth_file):
+    print(f"DEBUG: set_slam_variables called with particles = {particles}")
     window_size_pixel = 1500    # pixel size of window
     size_window = 30  # in meters
     number_particles = particles
+    groundtruth_file = groundtruth_file
+    # print(f"DEBUG: number_particles set to = {number_particles}")
     # tuning parameters
     # Q_init=np.diag([0.1,0.1])
     # Q_update=np.diag([0.7,0.7])
     alphas=[0.00008,0.00008,0.00001,0.00001]
     # can add to tuning options to use static instead of dynamic Q_init, Q_update,
     tuning_option = [ alphas]
-    return (window_size_pixel, size_window, number_particles, tuning_option)
+    return (window_size_pixel, size_window, number_particles, tuning_option, groundtruth_file)
 
 # Function to run the SLAM process
-def run_slam(rosbag_file, particles):
+def run_slam(rosbag_file, particles,groundtruth_file):
+    print(f"DEBUG: run_slam called with particles = {particles}")
     rosbag_process = None
     try:
         if not os.path.isfile(rosbag_file):
@@ -39,7 +43,7 @@ def run_slam(rosbag_file, particles):
         rospy.loginfo(f"Rosbag duration: {rosbag_time} seconds")
         
         # get defined parameters
-        slam_variables = set_slam_variables(particles)
+        slam_variables = set_slam_variables(particles, groundtruth_file)
         
         # call ArucoSlam class
         rospy.loginfo("Creating ArucoSLAM instance...")
@@ -70,21 +74,31 @@ if __name__ == '__main__':
         # Get the rosbag file parameter from the launch file
         file = rospy.get_param('~rosbag', 'simulation1.bag')
         rospy.loginfo(f'Rosbag file parameter: {file}')
+
+        #Get groundtruth file parameter from the launch file
+        yaml = rospy.get_param("~groundtruth", "simulation3.yaml")
+        rospy.loginfo(f'Groundtruth file parameter: {yaml}')
         
         # Find the rosbag file path
         rospack = rospkg.RosPack()
         path = rospack.get_path('pioneer_fast_slam')
         rospy.loginfo(f'Package path: {path}')
         
+        # Construct the full path to the rosbag file
         rosbag_file = f"{path}/src/rosbag/{file}"
         rospy.loginfo(f'Full rosbag path: {rosbag_file}')
 
         # Get number of particles from launch file parameter
         particles = int(rospy.get_param('~particles', 25))
         rospy.loginfo(f'Number of Particles: {particles}')
+        print(f"DEBUG: About to call run_slam with particles = {particles}")
+
+        # Get groundtruth file path
+        groundtruth_file = f"{path}/src/groundtruth/{yaml}"
+        rospy.loginfo(f'Full groundtruth path: {groundtruth_file}')
         
         # Run the SLAM process
-        run_slam(rosbag_file, particles)
+        run_slam(rosbag_file, particles, groundtruth_file)
         
     except rospy.ROSInterruptException:
         rospy.loginfo("ROS was interrupted")

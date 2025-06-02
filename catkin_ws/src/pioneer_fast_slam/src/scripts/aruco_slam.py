@@ -4,6 +4,7 @@ import rospy
 import subprocess
 import argparse
 import os
+import time
 # aruco and open cv libraries
 import cv2
 import cv2.aruco as aruco
@@ -43,16 +44,18 @@ class ArucoSLAM:
         # threading lock for parallel odometry and camera callbacks
         self.lock = threading.Lock()
         #Decide whether to use data association or not based on used aruco markers
-        self.use_data_association = True
+        self.use_data_association = False
         
+        # Note: ROS node is now initialized in main.py before this class is created
         # REMOVED: rospy.init_node('aruco_slam') - This should be done in main.py
-        rospy.loginfo('ArucoSLAM Node Started')
+        # rospy.loginfo('ArucoSLAM Node Started')
         
         # Create SLAM object
         # unpacks slam configuration parameters
-        window_size_pixel, size_m, number_particles, tunning_options = slam_variables
+        window_size_pixel, size_m, number_particles, tunning_options, groundtruth_file = slam_variables
+        # print(f"DEBUG: ArucoSLAM unpacked slam_variables: particles = {number_particles}")
         # calls create_slam that creates Fast Slam object
-        self.create_slam(window_size_pixel, size_m, tunning_options, number_particles)
+        self.create_slam(window_size_pixel, size_m, tunning_options, number_particles, groundtruth_file)
 
         # Subscribe to relevant ROS topics
         # subscribes to image topic and calls callback for each new image
@@ -85,12 +88,18 @@ class ArucoSLAM:
         self.count = 0
         # stores intial robot pose, everything else is built based on that
         self.tara = None
+        
+        # Performance monitoring
+        self.callback_count = 0
+        self.start_time = time.time()
+        self.last_metrics_save = time.time()
+        self.metrics_save_interval = 30.0  # Save metrics every 30 seconds
 
     # Create SLAM object
-    def create_slam(self, window_size_pixel, size_m, tunning_options, number_particles):
+    def create_slam(self, window_size_pixel, size_m, tunning_options, number_particles, groundtruth_file):
         #Pioneer P3-DX wheelbase (distance between two drive wheels, used to convert wheel velocities into motion)
         pioneer_L = 0.33
-        self.my_slam = FastSlam(tunning_options, window_size_pixel, size_m, pioneer_L, number_particles)
+        self.my_slam = FastSlam(tunning_options, window_size_pixel, size_m, pioneer_L, number_particles, groundtruth_file)
 
     # Callback function for odometry data
     def odom_callback(self, odom_data):
@@ -128,6 +137,7 @@ class ArucoSLAM:
         with self.lock:
             # resets list of currently detected arucos for this frame
             self.current_aruco = []
+            self.callback_count += 1
 
             try:
                 # Convert compressed image message to OpenCV format
@@ -266,19 +276,92 @@ class ArucoSLAM:
             "odom"
         )
 
+    def log_performance_summary(self):
+        """Log a performance summary to the ROS console."""
+        elapsed_time = time.time() - self.start_time
+        if elapsed_time > 0:
+            callback_rate = self.callback_count / elapsed_time
+            
+            # Get current metrics from SLAM
+            metrics = self.my_slam.get_current_metrics()
+            
+            rospy.loginfo("=== FastSLAM Performance Summary ===")
+            rospy.loginfo(f"Runtime: {elapsed_time:.1f}s, Callbacks: {self.callback_count}")
+            rospy.loginfo(f"Callback Rate: {callback_rate:.2f} Hz")
+            
+            if 'effective_particle_count' in metrics:
+                diversity = metrics['effective_particle_count']
+                rospy.loginfo(f"Particle Diversity: {diversity['n_eff_ratio']:.2%} ({diversity['current_n_eff']:.1f}/{self.my_slam.num_particles})")
+            
+            if 'timing_performance' in metrics:
+                timing = metrics['timing_performance']
+                if 'real_time_performance' in timing:
+                    rt = timing['real_time_performance']
+                    rospy.loginfo(f"Real-time Factor: {rt['real_time_factor']:.2f}x")
+            
+            rospy.loginfo(f"Detection Rate: {metrics['detection_rate']:.1f}%")
+            rospy.loginfo(f"Current RMSE: {metrics['current_rmse']:.3f}m")
+
     # Main loop to run the node
     def run(self):
         start_time = rospy.Time.now()
+        last_performance_log = time.time()
+        performance_log_interval = 60.0  # Log performance every 60 seconds
+        
         while not rospy.is_shutdown():  # Continue running until ROS node is shutdown
+            current_time = time.time()
+            
             # Publish transformation frames
             self.publish_tf()
             # Publish detected landmarks
             self.my_slam.publish_landmarks()
+            
+            # Periodic performance logging
+            if (current_time - last_performance_log) > performance_log_interval:
+                self.log_performance_summary()
+                last_performance_log = current_time
+            
+            # Periodic metrics saving
+            if (current_time - self.last_metrics_save) > self.metrics_save_interval:
+                timestamp = int(current_time)
+                metrics_filename = f"slam_metrics_{timestamp}.txt"
+                self.my_slam.save_metrics_to_file(metrics_filename)
+                rospy.loginfo(f"Periodic metrics saved to {metrics_filename}")
+                self.last_metrics_save = current_time
+            
             if self.rosbag_finished(start_time, self.k):  # Check if the rosbag playback has finished
-                rospy.loginfo("Rosbag playback finished. Shutting down...")
+                rospy.loginfo("Rosbag playback finished. Performing final analysis...")
+                
+                # Save final comprehensive metrics
+                final_metrics_filename = f"final_slam_metrics_{int(time.time())}.txt"
+                self.my_slam.save_metrics_to_file(final_metrics_filename)
+                
+                # Log final performance summary
+                self.log_performance_summary()
+                
+                # Log some final statistics
+                final_metrics = self.my_slam.get_current_metrics()
+                rospy.loginfo("=== Final SLAM Results ===")
+                rospy.loginfo(f"Final ATE: {final_metrics['current_ate']:.4f}m")
+                rospy.loginfo(f"Final RMSE: {final_metrics['current_rmse']:.4f}m")
+                rospy.loginfo(f"Total Landmarks Mapped: {final_metrics['landmarks_detected']}")
+                rospy.loginfo(f"Detection Success Rate: {final_metrics['detection_rate']:.1f}%")
+                
+                if 'effective_particle_count' in final_metrics:
+                    diversity = final_metrics['effective_particle_count']
+                    rospy.loginfo(f"Final Particle Diversity: {diversity['n_eff_ratio']:.2%}")
+                
+                if 'landmark_stability' in final_metrics:
+                    stability = final_metrics['landmark_stability']
+                    if stability['total_landmarks'] > 0:
+                        stability_rate = (stability['stable_landmarks'] / stability['total_landmarks']) * 100
+                        rospy.loginfo(f"Landmark Stability Rate: {stability_rate:.1f}%")
+                
+                rospy.loginfo(f"Comprehensive metrics saved to {final_metrics_filename}")
                 rospy.signal_shutdown("Rosbag playback finished")  # Shutdown ROS node
                 break  # Exit the loop
             rospy.sleep(0.1)  # Process ROS callbacks once
+            
         cv2.destroyAllWindows()  # Close OpenCV windows when node exits
         pygame.display.quit()
         pygame.quit()
@@ -289,7 +372,7 @@ class ArucoSLAM:
         if rospy.Time.now() > end_time:
             return True  # Playback finished
         else:
-            return False  # Playback ongoing
+            return False  # Playbook ongoing
 
     # Get the best trajectory from the SLAM object
     def get_trajectory(self):

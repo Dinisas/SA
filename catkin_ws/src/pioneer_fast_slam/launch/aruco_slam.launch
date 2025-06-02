@@ -4,6 +4,7 @@
   <arg name="rosbag" default="simulation1.bag" doc="Rosbag file to use for playback"/>
   <arg name="rviz" default="true" doc="Set to false to not launch rviz"/>
   <arg name="particles" default="25" doc="Number of particles for fast Slam Algorithm"/>
+  <arg name="groundtruth" default="simulation3.yaml" doc="Ground truth of aruco markers for evaluation"/>
   
   <!-- Main ArucoSLAM Node -->
   <!-- starts main ArucoSlam Node (calls it aruco_slam in ros), uses package pioneer_fast_slam, runs main.py script -->
@@ -11,6 +12,7 @@
       <!-- passes the rosbag filename and number of particles to python script -->
      <param name="~rosbag" value="$(arg rosbag)"/>
      <param name="~particles" value="$(arg particles)"/>
+     <param name="~groundtruth" value="$(arg groundtruth)"/>
   </node>
   
   <!-- Play the specified rosbag file -->
