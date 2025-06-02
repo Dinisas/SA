@@ -21,7 +21,7 @@
   <!-- Use TF static publisher for camera to base transform -->
   <!-- x, y, z, roll, pitch, yawn, parent, child, rate -->
   <node pkg="tf" type="static_transform_publisher" name="camera_base_broadcaster"
-      args="0.10 0.0 0.215 0 0 0 base_link camera_link 100"/>
+      args="0.22 0.0 0.27 0 0 0 base_link camera_link 100"/>
   
   <!-- RViz for visualization -->
   <!-- to not run rviz right add rviz:=false to running command (starts rviz with custom config file slam.rviz)-->

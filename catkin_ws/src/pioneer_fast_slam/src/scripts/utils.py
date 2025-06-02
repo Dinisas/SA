@@ -151,7 +151,7 @@ def transform_camera_to_robot(translation_vector):
         [0, 0, 1]
     ])
     # Translation vector from camera to robot frame
-    T_cam_to_robot = np.array([0.10, 0.0, 0.215]) 
+    T_cam_to_robot = np.array([0.22, 0.0, 0.27]) 
 
     # Convert translation_vector to homogeneous coordinates
     translation_vector_hom = np.append(translation_vector, [1])

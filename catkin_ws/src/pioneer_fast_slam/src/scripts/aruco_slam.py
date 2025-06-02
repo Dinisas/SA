@@ -35,14 +35,18 @@ class ArucoSLAM:
         self.k = rosbag_time + 5
         # creates TF Broadcaster used to publish coordinate frame transformations to ROS
         self.tf_broadcaster = tf.TransformBroadcaster()
-         # Camera calibration (reads camera matrix and distortion coefficients)
+        
+        # Camera calibration (reads camera matrix and distortion coefficients)
+        rospy.loginfo('Loading camera calibration...')
         self.calibrate_camera()
+        
         # threading lock for parallel odometry and camera callbacks
         self.lock = threading.Lock()
+        #Decide whether to use data association or not based on used aruco markers
+        self.use_data_association = True
         
+        # REMOVED: rospy.init_node('aruco_slam') - This should be done in main.py
         rospy.loginfo('ArucoSLAM Node Started')
-        # Initialize the ROS node
-        rospy.init_node('aruco_slam')
         
         # Create SLAM object
         # unpacks slam configuration parameters
@@ -53,8 +57,6 @@ class ArucoSLAM:
         # Subscribe to relevant ROS topics
         # subscribes to image topic and calls callback for each new image
         self.image_sub = rospy.Subscriber("/camera/image_raw/compressed", CompressedImage, self.image_callback)
-        # self.image_sub = rospy.Subscriber("/camera/image_raw", Image, self.image_callback)
-
         # subscribes to odometry topic and calls callback for each update in robot position    
         self.odom_sub = rospy.Subscriber("/pose", Odometry, self.odom_callback)
         # landmark publisher for visualization
@@ -120,7 +122,7 @@ class ArucoSLAM:
             # Update FAST SLAM algorithm with the new odometry information
             self.my_slam.update_odometry(self.odom)
 
-    # Callback function for image data
+    # Callback function for image data (returns range and bearing angle for each detected marker)
     def image_callback(self, data):
         # Ensure thread-safe operation with a lock
         with self.lock:
@@ -145,6 +147,13 @@ class ArucoSLAM:
                     # Draw bounding box around detected markers
                     cv2.polylines(cv_image, [np.int32(marker_corners)], True, (255, 165, 0), 3)
 
+                    #Calculate Marker pixel size (average side length of marker in pixels)
+                    side1 = np.linalg.norm(marker_corners[1] - marker_corners[0])
+                    side2 = np.linalg.norm(marker_corners[2] - marker_corners[1]) 
+                    side3 = np.linalg.norm(marker_corners[3] - marker_corners[2])
+                    side4 = np.linalg.norm(marker_corners[0] - marker_corners[3])
+                    marker_pixel_size = (side1 + side2 + side3 + side4) / 4.0
+
                     # perspective projection, Estimate pose of each marker in relation to the camera (tvec=translation vector in camera frame)
                     _, tvec, _ = cv2.aruco.estimatePoseSingleMarkers(corners[i], 0.16, self.camera_matrix, self.dist_coeffs)
 
@@ -155,7 +164,7 @@ class ArucoSLAM:
                     tvec = transform_camera_to_robot(tvec[0][0])
 
                     # Convert 3D position Cartesian coordinates to 2D polar coordinates (returns distance and bearing angle)
-                    dist, phi = cart2pol(tvec[0], tvec[2])
+                    dist, phi = cart2pol(tvec[0], tvec[2]) #nao devia ser index 1 = y ??
 
                     # checks if the marker as been seen before, fill the dictionary with angles if the marker is detected
                     if ids[i][0] not in self.dict:
@@ -179,12 +188,18 @@ class ArucoSLAM:
                                     (int(marker_corners[1][0] - 70), int(marker_corners[1][1]) - 10), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                         # creates tuple with distance, filrered angle and marker id
-                        self.current_aruco.append((dist, phi5, ids[i][0]))
+                        if self.use_data_association:
+                            self.current_aruco.append((dist, phi5, -1, marker_pixel_size))  # Use -1 instead of real ID
+                        else:
+                            self.current_aruco.append((dist, phi5, ids[i][0], marker_pixel_size))  # Use real ArUco ID
                     else:
                         # first two measurements not enough for median, uses raw angle measurement
-                        self.current_aruco.append((dist, -phi, ids[i][0]))
+                        if self.use_data_association:
+                            self.current_aruco.append((dist, -phi, -1, marker_pixel_size)) # Use -1 instead of real ID
+                        else:
+                            self.current_aruco.append((dist, -phi, ids[i][0], marker_pixel_size)) # Use real ArUco ID
 
-            # Compute SLAM with the all the detected ArUco markers (contains lists of tuples (distance, angle, marker id))
+            # Compute SLAM with the all the detected ArUco markers (contains lists of tuples (distance, angle, marker id, marker size in pixels))
             self.my_slam.compute_slam(self.current_aruco)
             # Show the image window with detected markers throughout time
             cv2.imshow('Aruco Detection', cv_image)
