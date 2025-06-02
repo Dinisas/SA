@@ -1,4 +1,4 @@
-prefix=/home/dinisas/SA/catkin_ws/devel
+prefix=/home/henrique/SA/catkin_ws/devel
 
 Name: pioneer_fast_slam
 Description: Description of pioneer_fast_slam

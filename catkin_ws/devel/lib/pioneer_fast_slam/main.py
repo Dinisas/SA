@@ -1,1 +1,1 @@
-/home/dinisas/SA/catkin_ws/src/pioneer_fast_slam/src/scripts/main.py
+/home/henrique/SA/catkin_ws/src/pioneer_fast_slam/src/scripts/main.py

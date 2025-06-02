@@ -1,0 +1,26 @@
+# Ground truth ArUco marker positions (relative to robot's starting position)
+# Coordinates are in meters, with robot start as origin (0,0)
+# Measure these from your drawn map
+
+markers:
+  # Replace these example coordinates with your actual measured positions
+  1: [5.08, 0]     # Marker ID 0 at 1.5m right, 2.0m forward from start
+  0: [3.19, -1.12]     # Marker ID 0 at 1.5m right, 2.0m forward from start
+  4: [0.34, -1.12]    # Marker ID 2 at 2.5m right, 1.0m behind start
+  7: [2.01, 0.53]   # Marker ID 3 at 2.0m left, 1.5m behind start
+  9: [0, -0.651]   # Marker ID 3 at 2.0m left, 1.5m behind start
+  2: [0, 1.04]     # Add more markers as needed
+  6: [0, 2.41]
+  3: [1.62, 1.7]
+
+  # Add all your markers here with their measured coordinates
+
+# Robot starting position (this is your reference point - keep as 0,0)
+robot_start: [0.0, 0.0]
+
+# Optional: Add some metadata about your setup
+measurement_info:
+  map_scale: "1:100"  # If using a scaled drawing
+  measurement_tool: "ruler"  # What you used to measure
+  date_measured: "2024-12-XX"
+  notes: "Measured from hand-drawn map of lab environment"
