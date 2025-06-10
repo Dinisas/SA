@@ -1,8 +1,8 @@
-# Install script for directory: /home/dinisas/SA/catkin_ws/src/pioneer_fast_slam
+# Install script for directory: /home/henrique/dinis/SA/catkin_ws/src/pioneer_fast_slam
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "/home/dinisas/SA/catkin_ws/install")
+  set(CMAKE_INSTALL_PREFIX "/home/henrique/dinis/SA/catkin_ws/install")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 
@@ -38,29 +38,29 @@ if(NOT DEFINED CMAKE_CROSSCOMPILING)
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig" TYPE FILE FILES "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/pioneer_fast_slam.pc")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig" TYPE FILE FILES "/home/henrique/dinis/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/pioneer_fast_slam.pc")
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
   file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam/cmake" TYPE FILE FILES
-    "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/pioneer_fast_slamConfig.cmake"
-    "/home/dinisas/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/pioneer_fast_slamConfig-version.cmake"
+    "/home/henrique/dinis/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/pioneer_fast_slamConfig.cmake"
+    "/home/henrique/dinis/SA/catkin_ws/build/pioneer_fast_slam/catkin_generated/installspace/pioneer_fast_slamConfig-version.cmake"
     )
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam" TYPE FILE FILES "/home/dinisas/SA/catkin_ws/src/pioneer_fast_slam/package.xml")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam" TYPE FILE FILES "/home/henrique/dinis/SA/catkin_ws/src/pioneer_fast_slam/package.xml")
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam/launch" TYPE DIRECTORY FILES "/home/dinisas/SA/catkin_ws/src/pioneer_fast_slam/src/launch/" FILES_MATCHING REGEX "/[^/]*\\.launch$")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam/launch" TYPE DIRECTORY FILES "/home/henrique/dinis/SA/catkin_ws/src/pioneer_fast_slam/src/launch/" FILES_MATCHING REGEX "/[^/]*\\.launch$")
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam/rviz" TYPE DIRECTORY FILES "/home/dinisas/SA/catkin_ws/src/pioneer_fast_slam/src/rviz/" FILES_MATCHING REGEX "/[^/]*\\.rviz$")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam/rviz" TYPE DIRECTORY FILES "/home/henrique/dinis/SA/catkin_ws/src/pioneer_fast_slam/src/rviz/" FILES_MATCHING REGEX "/[^/]*\\.rviz$")
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam/rosbag" TYPE DIRECTORY FILES "/home/dinisas/SA/catkin_ws/src/pioneer_fast_slam/src/rosbag/" REGEX "/[^/]*\\.bag[^/]*$")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pioneer_fast_slam/rosbag" TYPE DIRECTORY FILES "/home/henrique/dinis/SA/catkin_ws/src/pioneer_fast_slam/src/rosbag/" REGEX "/[^/]*\\.bag[^/]*$")
 endif()
 

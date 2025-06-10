@@ -8,21 +8,31 @@ import yaml
 import os
 import time
 from scipy.spatial.distance import cdist
-# ROS message types for landmark visualization
 from visualization_msgs.msg import Marker, MarkerArray
 from utils import resample, normalize_angle
-# custom Particle class
 from particle import Particle
-#custom Metrics class
 from metrics import SLAMMetricsTracker, MetricsTimer
 
 class FastSlam:
-    def __init__(self, tuning_option, window_size_pixel, size_m, pioneer_L,num_particles,groundtruth_file,screen=None, resample_method="low variance"):
+    def __init__(self, tuning_option, window_size_pixel, size_m, pioneer_L, num_particles, groundtruth_file, screen=None, resample_method="low variance"):
         print(f"DEBUG: FastSlam.__init__ called with num_particles = {num_particles}")
         # Initialize various parameters and settings
         self.tuning_options = tuning_option
         self.SCREEN_WIDTH = window_size_pixel
         self.SCREEN_HEIGHT = window_size_pixel
+
+        # Motion detection thresholds
+        self.min_motion_threshold = {
+            'linear': 0.001,   # 1mm minimum linear motion
+            'angular': 0.001   # ~0.057 degrees minimum angular motion
+        }
+        self.is_robot_moving = False
+        self.last_motion_time = time.time()
+        
+        # Update synchronization
+        self.last_odometry_update_time = time.time()
+        self.last_measurement_update_time = time.time()
+        self.min_time_between_updates = 0.033  # ~30Hz max update rate
 
         # Set up the pygame screen
         if screen is None:
@@ -36,7 +46,7 @@ class FastSlam:
             self.left_coordinate = 0
             self.right_coordinate = self.SCREEN_WIDTH
         
-        # choose resanpling method
+        # choose resampling method
         self.resample_method = resample_method
         
         # Define colors
@@ -45,81 +55,73 @@ class FastSlam:
         self.GREEN = (0, 160, 0)
         self.BLUE = (10, 10, 255)
         self.RED = (170, 0, 0)
-        self.ORANGE = (255, 165, 0)  # For ground truth markers
-        self.PURPLE = (128, 0, 128)  # For estimated markers
-        self.CYAN = (0, 255, 255)    # For trajectory
-        self.LIME = (50, 205, 50)    # For aligned landmarks
-        self.YELLOW = (255, 255, 0)  # For computational performance metrics
+        self.ORANGE = (255, 165, 0)
+        self.PURPLE = (128, 0, 128)
+        self.CYAN = (0, 255, 255)
+        self.LIME = (50, 205, 50)
+        self.YELLOW = (255, 255, 0)
 
         # Screen and map dimensions
         self.screen = screen      
         self.width_meters = size_m 
         self.height_meters = size_m
-        # Pioneer P3-DX radius (approximately 44cm diameter)
         self.pioneer_radius = 0.22
-        # robot wheel base
         self.pioneer_L = pioneer_L
-        # convert radius to pixels
         self.pioneer_radius_pixel = int(self.pioneer_radius * self.SCREEN_WIDTH / self.width_meters)
 
         # Initialize SLAM-related variables
         self.old_odometry = [0.0, 0.0]
         self.old_yaw = 0
         self.num_particles = num_particles
-        # index of best particle
         self.best_particle_ID = -1
-        # create initial particles
         self.particles = self.initialize_particles()
-        # Ros publisher for landmarks
         self.landmark_pub = rospy.Publisher('/landmarks', MarkerArray, queue_size=10)
         
         # Initialize the metrics tracker
-        self.metrics = SLAMMetricsTracker(num_particles=num_particles, groundtruth_file = groundtruth_file,expected_update_rate=10.0)
+        self.metrics = SLAMMetricsTracker(num_particles=num_particles, groundtruth_file=groundtruth_file, expected_update_rate=30.0)
 
         # Font for displaying metrics
         pygame.font.init()
         self.font = pygame.font.Font(None, 24)
         self.small_font = pygame.font.Font(None, 18)
         
-        self.update_screen()  # Update screen with initial state
+        # Motion accumulator
+        self.accumulated_motion = {
+            'distance': 0.0,
+            'rotation1': 0.0,
+            'rotation2': 0.0
+        }
+        
+        self.update_screen()
         return
     
-    # Publish landmark positions to a ROS topic
     def publish_landmarks(self):
-        # create ROS marker array message
         marker_array = MarkerArray()
 
-        # SAFE COPY - prevents "dictionary changed size during iteration"
         if self.best_particle_ID >= 0 and self.best_particle_ID < len(self.particles):
             landmarks_copy = dict(self.particles[self.best_particle_ID].landmarks)
 
         for landmark_id, landmark in landmarks_copy.items():
-            # extract landmark coordinates
             landmark_x, landmark_y = landmark.x, landmark.y
             
-            # Extract numeric ID from virtual IDs or use the ID directly
             if isinstance(landmark_id, str) and landmark_id.startswith("virtual_"):
-                # Extract number from "virtual_X" format
                 numeric_id = int(landmark_id.split("_")[1])
             else:
-                # For regular IDs, try to convert to int
                 try:
                     numeric_id = int(landmark_id)
                 except ValueError:
-                    # If conversion fails, use hash of the ID
                     numeric_id = abs(hash(landmark_id)) % 1000000
 
-            # Create a marker for the landmark
             marker = Marker()
             marker.header.frame_id = "map"
             marker.header.stamp = rospy.Time.now()
             marker.ns = "landmarks"
-            marker.id = numeric_id  # Use the numeric ID
+            marker.id = numeric_id
             marker.type = Marker.SPHERE
             marker.action = Marker.ADD
             marker.pose.position.x = -landmark_x
             marker.pose.position.y = landmark_y
-            marker.pose.position.z = 0  # Assuming 2D landmarks
+            marker.pose.position.z = 0
             marker.pose.orientation.x = 0.0
             marker.pose.orientation.y = 0.0
             marker.pose.orientation.z = 0.0
@@ -127,47 +129,41 @@ class FastSlam:
             marker.scale.x = 0.2
             marker.scale.y = 0.2
             marker.scale.z = 0.2
-            marker.color.a = 1.0  # Set the alpha
+            marker.color.a = 1.0
             marker.color.r = 0.0
             marker.color.g = 255.0
             marker.color.b = 0.0
 
-            # Add the marker to the array message
             marker_array.markers.append(marker)
 
-            # Create a marker for the text
             text_marker = Marker()
             text_marker.header.frame_id = "map"
             text_marker.header.stamp = rospy.Time.now()
             text_marker.ns = "landmark_text"
-            text_marker.id = numeric_id + 1000  # Ensure unique ID for text
+            text_marker.id = numeric_id + 1000
             text_marker.type = Marker.TEXT_VIEW_FACING
             text_marker.action = Marker.ADD
             text_marker.pose.position.x = -landmark_x
             text_marker.pose.position.y = landmark_y
-            text_marker.pose.position.z = 0.5  # Slightly above the landmark
+            text_marker.pose.position.z = 0.5
             text_marker.pose.orientation.x = 0.0
             text_marker.pose.orientation.y = 0.0
             text_marker.pose.orientation.z = 0.0
             text_marker.pose.orientation.w = 1.0
-            text_marker.scale.z = 0.4  # Text height
-            text_marker.color.a = 1.0  # Set the alpha
+            text_marker.scale.z = 0.4
+            text_marker.color.a = 1.0
             text_marker.color.r = 1.0
             text_marker.color.g = 255.0
             text_marker.color.b = 1.0
-            text_marker.text = f"id: {landmark_id}"  # Display the original ID
+            text_marker.text = f"id: {landmark_id}"
 
-            # Add the text marker to the array
             marker_array.markers.append(text_marker)
 
-        # Publish all markers (full marker array) to ROS
         self.landmark_pub.publish(marker_array)
     
-    # Get the particle with the best (highest) weight
     def get_best_particle(self):
         return self.particles[self.best_particle_ID]
     
-    # Initialize particles with random poses and empty landmarks (call Particle class)
     def initialize_particles(self, landmarks={}):
         print(f"DEBUG: initialize_particles called, creating {self.num_particles} particles")
         particles = []
@@ -180,9 +176,43 @@ class FastSlam:
         print(f"DEBUG: Created {len(particles)} particles")
         return particles
     
-    # Update the particles based on odometry data
+    def check_motion_significance(self, odometry):
+        """Check if robot has moved significantly since last update"""
+        quaternion = [odometry[2][0], odometry[2][1], odometry[2][2], odometry[2][3]]
+        (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
+        yaw = normalize_angle(yaw)
+        
+        # Calculate motion deltas
+        delta_x = odometry[0] - self.old_odometry[0]
+        delta_y = odometry[1] - self.old_odometry[1]
+        delta_dist = math.sqrt(delta_x**2 + delta_y**2)
+        delta_yaw = normalize_angle(yaw - self.old_yaw)
+        
+        # Check if motion is significant
+        if delta_dist > self.min_motion_threshold['linear'] or abs(delta_yaw) > self.min_motion_threshold['angular']:
+            self.is_robot_moving = True
+            self.last_motion_time = time.time()
+            return True
+        else:
+            # Check if robot has been stationary for a while
+            if time.time() - self.last_motion_time > 0.5:  # 500ms threshold
+                self.is_robot_moving = False
+            return False
+    
     def update_odometry(self, odometry):
-        """Update the particles based on odometry data."""
+        """Update the particles based on odometry data with motion detection."""
+        current_time = time.time()
+        
+        # Rate limiting
+        if current_time - self.last_odometry_update_time < self.min_time_between_updates:
+            return
+        
+        # Check if robot has moved significantly
+        if not self.check_motion_significance(odometry):
+            # Robot hasn't moved significantly - skip particle update
+            rospy.logdebug("Robot stationary - skipping particle motion update")
+            return
+        
         # Use the metrics timer context manager
         with MetricsTimer(self.metrics, 'motion_update'):
             # Extract quaternion
@@ -200,25 +230,45 @@ class FastSlam:
                                                 odometry[0] - self.old_odometry[0]) - self.old_yaw)
             delta_rot2 = normalize_angle(yaw - self.old_yaw - delta_rot1)
 
-            # Update each particle with motion model
+            # Accumulate motion
+            self.accumulated_motion['distance'] += delta_dist
+            self.accumulated_motion['rotation1'] += delta_rot1
+            self.accumulated_motion['rotation2'] += delta_rot2
+
+            # Update each particle with accumulated motion
             for particle in self.particles:
-                particle.motion_model([delta_dist, delta_rot1, delta_rot2])
+                particle.motion_model([
+                    self.accumulated_motion['distance'],
+                    self.accumulated_motion['rotation1'],
+                    self.accumulated_motion['rotation2']
+                ])
+            
+            # Reset accumulated motion
+            self.accumulated_motion = {
+                'distance': 0.0,
+                'rotation1': 0.0,
+                'rotation2': 0.0
+            }
             
             # Update old odometry and yaw
             self.old_odometry = copy.deepcopy(odometry)
             self.old_yaw = copy.deepcopy(yaw)
+            self.last_odometry_update_time = current_time
         
         self.update_screen()
 
     def compute_slam(self, landmarks_in_sight):
         """
         Compute SLAM with support for both correspondence and non-correspondence problems.
-        
-        Automatically detects mode based on landmark IDs:
-        - If landmark_id == -1: Use data association (non-correspondence)
-        - If landmark_id != -1: Use unique IDs (correspondence)
+        Only processes when there are actual measurements.
         """
         if not landmarks_in_sight:
+            return
+        
+        current_time = time.time()
+        
+        # Rate limiting for measurement updates
+        if current_time - self.last_measurement_update_time < self.min_time_between_updates:
             return
         
         # Track total update time
@@ -249,9 +299,16 @@ class FastSlam:
             
             # Resample particles if needed
             with MetricsTimer(self.metrics, 'resampling'):
-                self.particles, self.best_particle_ID = resample(
-                    self.particles, self.num_particles, self.resample_method, self.best_particle_ID
-                )
+                # More conservative resampling threshold when stationary
+                resample_threshold = 0.5 if self.is_robot_moving else 0.3
+                
+                if n_eff < self.num_particles * resample_threshold:
+                    self.particles, self.best_particle_ID = resample(
+                        self.particles, self.num_particles, self.resample_method, self.best_particle_ID
+                    )
+                else:
+                    # Update best particle without resampling
+                    self.best_particle_ID = np.argmax(weights)
             
             # Update metrics after resampling
             best_particle = self.get_best_particle()
@@ -265,6 +322,7 @@ class FastSlam:
             
             # Increment update count
             self.metrics.increment_update_count()
+            self.last_measurement_update_time = current_time
         
         # Update visualization
         self.update_screen(landmarks_in_sight)
@@ -284,14 +342,7 @@ class FastSlam:
                 pygame.draw.lines(self.screen, self.CYAN, False, points, 2)
 
     def draw_markers(self, marker_type, marker_data=None):
-        """
-        Unified function to draw different types of markers.
-        
-        Args:
-            marker_type: 'ground_truth', 'estimated', or 'aligned'
-            marker_data: Optional custom data to use
-        """
-        # Configure based on marker type
+        """Unified function to draw different types of markers."""
         configs = {
             'ground_truth': {
                 'color': self.ORANGE,
@@ -305,7 +356,7 @@ class FastSlam:
                 'color': self.PURPLE,
                 'shape': 'circle',
                 'prefix': 'EST',
-                'data_source': None,  # Will extract from best particle
+                'data_source': None,
                 'text_offset': (0, 20),
                 'draw_error': True,
                 'error_color': self.RED,
@@ -332,7 +383,6 @@ class FastSlam:
         if marker_data is not None:
             data = marker_data
         elif marker_type == 'estimated':
-            # Extract from best particle
             best_particle = self.get_best_particle()
             data = {lid: (lm.x, lm.y) for lid, lm in best_particle.landmarks.items()}
         else:
@@ -397,7 +447,7 @@ class FastSlam:
         panel_x = 10
         panel_y = 10
         panel_width = 500
-        panel_height = 450
+        panel_height = 480
         
         # Draw background
         pygame.draw.rect(self.screen, (0, 0, 0, 180), 
@@ -411,6 +461,13 @@ class FastSlam:
         title = self.font.render("SLAM Performance Metrics", True, self.WHITE)
         self.screen.blit(title, (panel_x + 10, y_offset))
         y_offset += 30
+        
+        # Robot status
+        status_color = self.GREEN if self.is_robot_moving else self.RED
+        status_text = "MOVING" if self.is_robot_moving else "STATIONARY"
+        robot_status = self.font.render(f"Robot Status: {status_text}", True, status_color)
+        self.screen.blit(robot_status, (panel_x + 10, y_offset))
+        y_offset += 25
         
         # Display metrics
         metrics_to_display = [
@@ -467,7 +524,7 @@ class FastSlam:
             if rt:
                 rt_metrics = [
                     f"RT Factor: {rt.get('real_time_factor', 0):.2f}x",
-                    f"Rate: {rt.get('actual_rate_hz', 0):.1f}Hz"
+                    f"Rate: {rt.get('actual_rate_hz', 0):.1f}Hz / 30Hz target"
                 ]
                 
                 for text in rt_metrics:
@@ -495,10 +552,7 @@ class FastSlam:
         self.screen.blit(text_surface, (panel_x + 20, y_offset))
 
     def _process_unique_id_landmarks(self, unique_id_landmarks):
-        """
-        Process landmarks with unique IDs (correspondence problem).
-        Each particle independently handles the landmark.
-        """
+        """Process landmarks with unique IDs (correspondence problem)."""
         for landmark in unique_id_landmarks:
             landmark_dist, landmark_bearing_angle, landmark_id, marker_pixel_size = landmark
             landmark_id_str = str(landmark_id)
@@ -513,10 +567,7 @@ class FastSlam:
                 )
 
     def _process_data_association_landmarks(self, data_assoc_landmarks):
-        """
-        Process landmarks requiring data association (non-correspondence problem).
-        Uses shared decision making across all particles to maintain consistency.
-        """
+        """Process landmarks requiring data association (non-correspondence problem)."""
         # Get decision-making particle (best or first)
         decision_particle_id = self.best_particle_ID if self.best_particle_ID >= 0 else 0
         decision_particle = self.particles[decision_particle_id]
@@ -546,7 +597,7 @@ class FastSlam:
             if should_create:
                 new_id = f"virtual_{len(decision_particle.landmarks)}"
                 association_decisions.append(('create', new_id))
-                self.landmark_creation_cooldown = 10  # Cooldown for 10 updates
+                self.landmark_creation_cooldown = 10
             else:
                 association_decisions.append(('update', best_match_id))
         
@@ -575,28 +626,30 @@ class FastSlam:
             self.landmark_creation_cooldown -= 1
 
     def _should_create_new_landmark(self, best_match_id, min_distance, num_landmarks):
-        """
-        Decide whether to create a new landmark based on multiple criteria.
-        
-        Returns:
-            bool: True if should create new landmark, False otherwise
-        """
+        """Decide whether to create a new landmark based on multiple criteria."""
         # No existing landmarks - create first one
         if best_match_id is None:
             return True
         
-        # Dynamic threshold based on number of landmarks
+        # Dynamic threshold based on number of landmarks and robot motion
         base_threshold = 4.0
-        if num_landmarks < 3:
-            threshold = base_threshold * 0.8  # More permissive early on
-        elif num_landmarks < 5:
-            threshold = base_threshold
+        
+        # Adjust threshold based on robot motion status
+        if not self.is_robot_moving:
+            # More conservative when stationary
+            threshold = base_threshold * 1.5
         else:
-            threshold = base_threshold * 1.2  # More conservative with many landmarks
+            # Normal thresholds when moving
+            if num_landmarks < 3:
+                threshold = base_threshold * 0.8
+            elif num_landmarks < 5:
+                threshold = base_threshold
+            else:
+                threshold = base_threshold * 1.2
         
         # Check if we're in creation cooldown
         if self.landmark_creation_cooldown > 0 and min_distance < threshold * 1.5:
-            return False  # Don't create during cooldown unless very far
+            return False
         
         # Make decision based on distance
         return min_distance > threshold
@@ -642,13 +695,14 @@ class FastSlam:
             # Draw elements in order
             self.draw_trajectory()
            
-            #Draw ground truth, estimated and aligned markers
+            # Draw ground truth, estimated and aligned markers
             self.draw_markers('ground_truth')
             self.draw_markers('estimated')
             self.draw_markers('aligned')    
             
             # Draw robot
-            pygame.draw.circle(self.screen, self.GREEN, pioneer_pos, self.pioneer_radius_pixel)
+            robot_color = self.GREEN if self.is_robot_moving else self.ORANGE
+            pygame.draw.circle(self.screen, robot_color, pioneer_pos, self.pioneer_radius_pixel)
             pygame.draw.polygon(self.screen, self.BLUE, triangle_points)
 
             # Draw particles
@@ -675,8 +729,8 @@ class FastSlam:
         legend_y = 10
         
         # Background
-        pygame.draw.rect(self.screen, (0, 0, 0, 128), (legend_x, legend_y, 230, 160))
-        pygame.draw.rect(self.screen, self.WHITE, (legend_x, legend_y, 230, 160), 1)
+        pygame.draw.rect(self.screen, (0, 0, 0, 128), (legend_x, legend_y, 230, 180))
+        pygame.draw.rect(self.screen, self.WHITE, (legend_x, legend_y, 230, 180), 1)
         
         y_pos = legend_y + 10
         
@@ -690,7 +744,8 @@ class FastSlam:
             ("Ground Truth", self.ORANGE),
             ("Estimated", self.PURPLE),
             ("Kabsch Aligned", self.LIME),
-            ("Robot", self.GREEN),
+            ("Robot (Moving)", self.GREEN),
+            ("Robot (Stationary)", self.ORANGE),
             ("Trajectory", self.CYAN),
             ("Error Lines", self.RED)
         ]
@@ -703,7 +758,6 @@ class FastSlam:
             self.screen.blit(text_surface, (legend_x + 30, y_pos))
             y_pos += 20
 
-    # Get the best trajectory from the best particle
     def get_best_trajectory(self):
         return self.particles[self.best_particle_ID].trajectory
 

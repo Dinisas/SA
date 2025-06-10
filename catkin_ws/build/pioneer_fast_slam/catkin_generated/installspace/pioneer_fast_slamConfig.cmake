@@ -67,14 +67,14 @@ set(pioneer_fast_slam_CONFIG_INCLUDED TRUE)
 
 # set variables for source/devel/install prefixes
 if("FALSE" STREQUAL "TRUE")
-  set(pioneer_fast_slam_SOURCE_PREFIX /home/dinisas/SA/catkin_ws/src/pioneer_fast_slam)
-  set(pioneer_fast_slam_DEVEL_PREFIX /home/dinisas/SA/catkin_ws/devel)
+  set(pioneer_fast_slam_SOURCE_PREFIX /home/henrique/dinis/SA/catkin_ws/src/pioneer_fast_slam)
+  set(pioneer_fast_slam_DEVEL_PREFIX /home/henrique/dinis/SA/catkin_ws/devel)
   set(pioneer_fast_slam_INSTALL_PREFIX "")
   set(pioneer_fast_slam_PREFIX ${pioneer_fast_slam_DEVEL_PREFIX})
 else()
   set(pioneer_fast_slam_SOURCE_PREFIX "")
   set(pioneer_fast_slam_DEVEL_PREFIX "")
-  set(pioneer_fast_slam_INSTALL_PREFIX /home/dinisas/SA/catkin_ws/install)
+  set(pioneer_fast_slam_INSTALL_PREFIX /home/henrique/dinis/SA/catkin_ws/install)
   set(pioneer_fast_slam_PREFIX ${pioneer_fast_slam_INSTALL_PREFIX})
 endif()
 
@@ -118,7 +118,7 @@ endif()
 
 set(libraries "")
 foreach(library ${libraries})
-  # keep build configuration keywords, target names and absolute libraries as-is
+  # keep build configuration keywords, generator expressions, target names, and absolute libraries as-is
   if("${library}" MATCHES "^(debug|optimized|general)$")
     list(APPEND pioneer_fast_slam_LIBRARIES ${library})
   elseif(${library} MATCHES "^-l")
@@ -146,6 +146,8 @@ foreach(library ${libraries})
       target_link_options("${interface_target_name}" INTERFACE "${library}")
     endif()
     list(APPEND pioneer_fast_slam_LIBRARIES "${interface_target_name}")
+  elseif(${library} MATCHES "^\\$<")
+    list(APPEND pioneer_fast_slam_LIBRARIES ${library})
   elseif(TARGET ${library})
     list(APPEND pioneer_fast_slam_LIBRARIES ${library})
   elseif(IS_ABSOLUTE ${library})
@@ -154,7 +156,7 @@ foreach(library ${libraries})
     set(lib_path "")
     set(lib "${library}-NOTFOUND")
     # since the path where the library is found is returned we have to iterate over the paths manually
-    foreach(path /home/dinisas/SA/catkin_ws/install/lib;/home/dinisas/SA/catkin_ws/devel/lib;/opt/ros/noetic/lib)
+    foreach(path /home/henrique/dinis/SA/catkin_ws/install/lib;/opt/ros/noetic/lib)
       find_library(lib ${library}
         PATHS ${path}
         NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)

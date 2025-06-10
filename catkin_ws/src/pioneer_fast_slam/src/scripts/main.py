@@ -10,24 +10,31 @@ import traceback
 import sys
 
 # Function to set SLAM variables
-def set_slam_variables(particles, groundtruth_file):
-    print(f"DEBUG: set_slam_variables called with particles = {particles}")
+def set_slam_variables(particles, groundtruth_file, update_rate):
+    print(f"DEBUG: set_slam_variables called with particles = {particles}, update_rate = {update_rate}Hz")
     window_size_pixel = 1500    # pixel size of window
     size_window = 30  # in meters
     number_particles = particles
     groundtruth_file = groundtruth_file
-    # print(f"DEBUG: number_particles set to = {number_particles}")
-    # tuning parameters
-    # Q_init=np.diag([0.1,0.1])
-    # Q_update=np.diag([0.7,0.7])
-    alphas=[0.00008,0.00008,0.00001,0.00001]
-    # can add to tuning options to use static instead of dynamic Q_init, Q_update,
-    tuning_option = [ alphas]
+    
+    # Adaptive tuning parameters based on update rate
+    # Lower update rates need less aggressive motion noise
+    noise_scale = 30.0 / update_rate  # Scale noise based on update rate
+    
+    # Tuning parameters - adjusted for better performance
+    alphas = [
+        0.00008 * noise_scale,  # Rotation noise from rotation
+        0.00008 * noise_scale,  # Rotation noise from translation  
+        0.00001 * noise_scale,  # Translation noise from translation
+        0.00001 * noise_scale   # Translation noise from rotation
+    ]
+    
+    tuning_option = [alphas]
     return (window_size_pixel, size_window, number_particles, tuning_option, groundtruth_file)
 
 # Function to run the SLAM process
-def run_slam(rosbag_file, particles,groundtruth_file):
-    print(f"DEBUG: run_slam called with particles = {particles}")
+def run_slam(rosbag_file, particles, groundtruth_file, update_rate):
+    print(f"DEBUG: run_slam called with particles = {particles}, update_rate = {update_rate}Hz")
     rosbag_process = None
     try:
         if not os.path.isfile(rosbag_file):
@@ -42,12 +49,30 @@ def run_slam(rosbag_file, particles,groundtruth_file):
         rosbag_time = get_rosbag_duration(rosbag_file)
         rospy.loginfo(f"Rosbag duration: {rosbag_time} seconds")
         
+        # Display SLAM configuration
+        rospy.loginfo("=== FastSLAM Configuration ===")
+        rospy.loginfo(f"Number of particles: {particles}")
+        rospy.loginfo(f"Update rate: {update_rate} Hz")
+        rospy.loginfo(f"Ground truth file: {groundtruth_file}")
+        rospy.loginfo("==============================")
+        
         # get defined parameters
-        slam_variables = set_slam_variables(particles, groundtruth_file)
+        slam_variables = set_slam_variables(particles, groundtruth_file, update_rate)
+        
+        # Modify ArucoSLAM to accept update_rate
+        # Since we can't modify the ArucoSLAM constructor directly, 
+        # we'll set it as a ROS parameter that ArucoSLAM can read
+        rospy.set_param('~slam_update_rate', update_rate)
         
         # call ArucoSlam class
         rospy.loginfo("Creating ArucoSLAM instance...")
         slam = ArucoSLAM(rosbag_time, slam_variables)
+        
+        # Override the update rate if the class supports it
+        if hasattr(slam, 'update_rate'):
+            slam.update_rate = update_rate
+            slam.min_update_interval = 1.0 / update_rate
+            rospy.loginfo(f"Set SLAM update rate to {update_rate} Hz")
         
         # play run function from ArucoSlam class
         rospy.loginfo("Starting SLAM run...")
@@ -75,30 +100,35 @@ if __name__ == '__main__':
         file = rospy.get_param('~rosbag', 'simulation1.bag')
         rospy.loginfo(f'Rosbag file parameter: {file}')
 
-        #Get groundtruth file parameter from the launch file
+        # Get groundtruth file parameter from the launch file
         yaml = rospy.get_param("~groundtruth", "simulation3.yaml")
         rospy.loginfo(f'Groundtruth file parameter: {yaml}')
+        
+        # Get number of particles from launch file parameter
+        particles = int(rospy.get_param('~particles', 50))
+        rospy.loginfo(f'Number of Particles: {particles}')
+        
+        # Get update rate from launch file parameter
+        update_rate = float(rospy.get_param('~update_rate', 30.0))
+        rospy.loginfo(f'Target Update Rate: {update_rate} Hz')
         
         # Find the rosbag file path
         rospack = rospkg.RosPack()
         path = rospack.get_path('pioneer_fast_slam')
         rospy.loginfo(f'Package path: {path}')
         
-        # Construct the full path to the rosbag file
+        # Construct the full paths
         rosbag_file = f"{path}/src/rosbag/{file}"
         rospy.loginfo(f'Full rosbag path: {rosbag_file}')
-
-        # Get number of particles from launch file parameter
-        particles = int(rospy.get_param('~particles', 25))
-        rospy.loginfo(f'Number of Particles: {particles}')
-        print(f"DEBUG: About to call run_slam with particles = {particles}")
-
+        
         # Get groundtruth file path
         groundtruth_file = f"{path}/src/groundtruth/{yaml}"
         rospy.loginfo(f'Full groundtruth path: {groundtruth_file}')
         
+        print(f"DEBUG: About to call run_slam with particles = {particles}, update_rate = {update_rate}")
+        
         # Run the SLAM process
-        run_slam(rosbag_file, particles, groundtruth_file)
+        run_slam(rosbag_file, particles, groundtruth_file, update_rate)
         
     except rospy.ROSInterruptException:
         rospy.loginfo("ROS was interrupted")

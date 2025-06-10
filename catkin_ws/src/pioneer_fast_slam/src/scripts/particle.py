@@ -6,10 +6,7 @@ from utils import normalize_angle
 class Particle:
     """ 
     Particle class representing a single particle in the particle filter.
-    Attributes:
-        pose: The current pose (x, y, theta) of the particle.
-        landmarks: A dictionary of landmarks observed by this particle.
-        weight: The weight of the particle.
+    Enhanced with better motion model for stationary robot handling.
     """
         
     def __init__(self, pose, nr_particles, pioneer_L, tuning_option):
@@ -28,11 +25,13 @@ class Particle:
         self.next_virtual_id = 0
         self.virtual_id_assignments = {}
         # tuning options
-        # self.Q_init = tuning_option[0]
-        # self.Q_update = tuning_option[1]
-        #change index to 2, in case of texting with static Q
         self.alphas = tuning_option[0]
-
+        
+        # Motion thresholds
+        self.min_motion_for_update = {
+            'distance': 0.001,  # 1mm
+            'rotation': 0.001   # ~0.057 degrees
+        }
 
     def assign_virtual_id(self):
         """Generate a new virtual ID for a newly detected marker"""
@@ -43,42 +42,66 @@ class Particle:
     ## MOTION MODEL ## (particle prediction step based on motion model)
     def motion_model(self, odometry_delta):
         """ 
-        This function updates the particle's pose based on odometry (motion model).
+        Enhanced motion model that handles stationary robots better.
         Args:
             odometry_delta: Tuple containing (delta_dist, delta_rot1, delta_rot2).
         """
         # get current pose
         x, y, theta = self.get_pose()
-        # add current pose to trajectory
-        self.trajectory.append((x, y, theta))
+        
         # unpack motion deltas
         delta_dist, delta_rot1, delta_rot2 = odometry_delta
-
-        # Parameters for motion noise
-        alpha1 = self.alphas[0]
-        alpha2 = self.alphas[1]
-        alpha3 = self.alphas[2]
-        alpha4 = self.alphas[3]
-
-        # Calculate deviations with noise from alpha tuning parameters
-        deviation_dist = math.sqrt(alpha1 * delta_rot1**2 + alpha2 * delta_dist**2)
-        deviation_rot1 = math.sqrt(alpha3 * delta_dist**2 + alpha4 * delta_rot1**2 + alpha4 * delta_rot2**2)
-        deviation_rot2 = math.sqrt(alpha1 * delta_rot2**2 + alpha2 * delta_dist**2)
-
-        # add gaussian noise to distance and first/second rotations
-        delta_dist -= np.random.normal(0, deviation_dist)
-        delta_rot1 -= np.random.normal(0, deviation_rot1)
-        delta_rot2 -= np.random.normal(0, deviation_rot2)
         
-        # Update the pose (with new orientation and position)
-        new_x = x + delta_dist * math.cos(theta + delta_rot1)
-        new_y = y - delta_dist * math.sin(theta + delta_rot1)
-        new_theta = normalize_angle(theta + delta_rot1 + delta_rot2)
+        # Check if motion is significant enough to warrant an update
+        if (abs(delta_dist) < self.min_motion_for_update['distance'] and 
+            abs(delta_rot1) < self.min_motion_for_update['rotation'] and 
+            abs(delta_rot2) < self.min_motion_for_update['rotation']):
+            # Robot is essentially stationary - minimal noise
+            # Add very small noise to prevent particle degeneracy
+            new_x = x + np.random.normal(0, 0.0001)  # 0.1mm std dev
+            new_y = y + np.random.normal(0, 0.0001)
+            new_theta = normalize_angle(theta + np.random.normal(0, 0.0001))  # ~0.0057 degrees
+        else:
+            # Robot is moving - use full motion model
+            # Add current pose to trajectory only when moving
+            self.trajectory.append((x, y, theta))
+            
+            # Parameters for motion noise - adaptive based on motion magnitude
+            alpha1 = self.alphas[0]
+            alpha2 = self.alphas[1]
+            alpha3 = self.alphas[2]
+            alpha4 = self.alphas[3]
+            
+            # Scale noise based on motion magnitude
+            motion_scale = min(1.0, abs(delta_dist) / 0.1)  # Normalized by 10cm
+            rotation_scale = min(1.0, (abs(delta_rot1) + abs(delta_rot2)) / 0.2)  # Normalized by ~11.5 degrees
+            
+            # Adaptive noise calculation
+            deviation_dist = motion_scale * math.sqrt(alpha1 * delta_rot1**2 + alpha2 * delta_dist**2)
+            deviation_rot1 = rotation_scale * math.sqrt(alpha3 * delta_dist**2 + alpha4 * delta_rot1**2 + alpha4 * delta_rot2**2)
+            deviation_rot2 = rotation_scale * math.sqrt(alpha1 * delta_rot2**2 + alpha2 * delta_dist**2)
+            
+            # Ensure minimum noise to prevent degeneracy
+            deviation_dist = max(deviation_dist, 0.001)  # At least 1mm
+            deviation_rot1 = max(deviation_rot1, 0.001)  # At least 0.057 degrees
+            deviation_rot2 = max(deviation_rot2, 0.001)
+            
+            # Add gaussian noise to motion components
+            noisy_dist = delta_dist + np.random.normal(0, deviation_dist)
+            noisy_rot1 = delta_rot1 + np.random.normal(0, deviation_rot1)
+            noisy_rot2 = delta_rot2 + np.random.normal(0, deviation_rot2)
+            
+            # Update the pose with noisy motion
+            new_x = x + noisy_dist * math.cos(theta + noisy_rot1)
+            new_y = y - noisy_dist * math.sin(theta + noisy_rot1)
+            new_theta = normalize_angle(theta + noisy_rot1 + noisy_rot2)
+        
         self.pose = np.array([new_x, new_y, new_theta])
 
     def get_dynamic_measurement_covariance(self, distance_meters, marker_pixel_size):
         """
         Calculate realistic measurement covariance for camera-based SLAM.
+        Enhanced to consider robot motion state.
         
         Args:
             distance_meters: Distance to the landmark
@@ -87,26 +110,31 @@ class Particle:
         Returns:
             2x2 covariance matrix
         """
-        # Realistic camera uncertainty: 3-5% of distance
-        sigma_r = 0.03 * distance_meters + 0.02  # 3% of distance + 2cm base
+        # Base camera uncertainty
+        base_range_uncertainty = 0.03 * distance_meters + 0.02  # 3% of distance + 2cm
+        base_bearing_uncertainty = np.radians(3.0)  # 3 degrees base
         
-        # Bearing uncertainty: 2-5 degrees is typical for cameras
-        sigma_theta = np.radians(3.0)  # 3 degrees base uncertainty
+        # Pixel size factor - smaller markers have higher uncertainty
+        pixel_factor = max(1.0, 100.0 / marker_pixel_size) if marker_pixel_size > 0 else 2.0
+        
+        # Apply pixel factor
+        sigma_r = base_range_uncertainty * pixel_factor
+        sigma_theta = base_bearing_uncertainty * pixel_factor
         
         # Ensure minimum values
         sigma_r = max(sigma_r, 0.05)  # At least 5cm
         sigma_theta = max(sigma_theta, np.radians(2.0))  # At least 2 degrees
         
-        # SLAM scaling factors (moderate, not too aggressive)
-        slam_range_factor = 2.0
-        slam_bearing_factor = 2.0
+        # SLAM scaling factors
+        slam_range_factor = 1.5  # Less aggressive than before
+        slam_bearing_factor = 1.5
         
         sigma_r *= slam_range_factor
         sigma_theta *= slam_bearing_factor
         
         # Final minimums after scaling
-        sigma_r = max(sigma_r, 0.10)  # At least 10cm
-        sigma_theta = max(sigma_theta, np.radians(3.0))  # At least 3 degrees
+        sigma_r = max(sigma_r, 0.08)  # At least 8cm
+        sigma_theta = max(sigma_theta, np.radians(2.5))  # At least 2.5 degrees
         
         # Create covariance matrix
         Q = np.array([[sigma_r**2, 0.0],
@@ -139,6 +167,7 @@ class Particle:
     def calculate_mahalanobis_distance(self, measured_range, measured_bearing, landmark, marker_pixel_size):
         """
         Calculate Mahalanobis distance for data association.
+        Enhanced with better numerical stability.
         
         Args:
             measured_range: Measured distance to landmark
@@ -164,7 +193,7 @@ class Particle:
         q = dx**2 + dy**2
         sqrt_q = math.sqrt(q)
         
-        if sqrt_q < 0.001:
+        if sqrt_q < 0.01:  # 1cm minimum distance
             return float('inf')
         
         J = np.array([[dx / sqrt_q, dy / sqrt_q, 0],
@@ -176,20 +205,27 @@ class Particle:
         # Innovation covariance: S = J*P*J' + Q
         S = J @ landmark.sigma @ J.T + Q
         
-        # Add small regularization for numerical stability
-        S += np.eye(2) * 1e-6
+        # Add regularization for numerical stability
+        regularization = np.eye(2) * 1e-4
+        S += regularization
         
         try:
+            # Check condition number
+            cond_num = np.linalg.cond(S)
+            if cond_num > 1e10:
+                # Matrix is poorly conditioned
+                return float('inf')
+            
             # Use Cholesky decomposition for stability
             L = np.linalg.cholesky(S)
             y = np.linalg.solve(L, innovation)
             mahalanobis_dist = math.sqrt(np.dot(y, y))
             return mahalanobis_dist
         except np.linalg.LinAlgError:
-            # Fallback to standard inverse
+            # Fallback to pseudo-inverse for singular matrices
             try:
-                S_inv = np.linalg.inv(S)
-                mahalanobis_dist = math.sqrt(innovation.T @ S_inv @ innovation)
+                S_pinv = np.linalg.pinv(S)
+                mahalanobis_dist = math.sqrt(innovation.T @ S_pinv @ innovation)
                 return mahalanobis_dist
             except:
                 return float('inf')
@@ -197,6 +233,7 @@ class Particle:
     def find_best_landmark_association(self, measured_range, measured_bearing, marker_pixel_size):
         """
         Find the best landmark to associate with a measurement.
+        Enhanced with better search strategy.
         
         Args:
             measured_range: Measured distance
@@ -212,13 +249,22 @@ class Particle:
         min_distance = float('inf')
         best_landmark_id = None
         
+        # Pre-filter landmarks based on rough distance
+        max_range_error = measured_range * 0.5 + 1.0  # 50% + 1m tolerance
+        
+        candidates = []
         for landmark_id, landmark in self.landmarks.items():
-            # Quick distance check for optimization
+            # Quick distance check
             rough_dist = landmark.distance_to(self.pose[0], self.pose[1])
-            if rough_dist > measured_range + 3.0:  # 3m tolerance
-                continue
-            
-            # Calculate Mahalanobis distance
+            if abs(rough_dist - measured_range) <= max_range_error:
+                candidates.append((landmark_id, landmark))
+        
+        # If no candidates within range, consider all landmarks
+        if not candidates:
+            candidates = list(self.landmarks.items())
+        
+        # Calculate Mahalanobis distance for candidates
+        for landmark_id, landmark in candidates:
             distance = self.calculate_mahalanobis_distance(
                 measured_range, measured_bearing, landmark, marker_pixel_size
             )
@@ -247,119 +293,130 @@ class Particle:
     def handle_landmark(self, landmark_dist, landmark_bearing_angle, landmark_id, marker_pixel_size):
         """
         Main landmark handling method - routes to appropriate handler.
-        
-        This method is called by the old compute_slam for backwards compatibility.
         """
-        # For data association mode (landmark_id == -1), this shouldn't be called
-        # as the particle filter handles association at a higher level
         if landmark_id == -1:
             raise ValueError("Data association should be handled at particle filter level")
         
-        # For correspondence mode, use the ID-based handler
         self.handle_landmark_with_id(landmark_dist, landmark_bearing_angle, str(landmark_id), marker_pixel_size)
 
     def create_landmark(self, distance, angle, landmark_id, marker_pixel_size):
         """
         Create a new landmark in the particle's map.
-        Args:
-            distance: Distance to the landmark.
-            angle: Bearing angle to the landmark.
-            landmark_id: Identifier of the landmark.
+        Enhanced with better initialization.
         """
         # get particle pose and update landmark position accordingly
         x, y, theta = self.get_pose()
-        #bearing angle (angle): how much the robot is rotated from the robot's forward direction
-        #particle orientation (theta): how much the robot is rotated from global frame
+        
         # create marker from observation
         landmark_x = x + distance * math.cos(theta + angle)
         landmark_y = y - distance * math.sin(theta + angle)
         self.landmarks[landmark_id] = Landmark(landmark_x, landmark_y)
         
-        # Landmark prediction of the measurement based on the motion model(predicted distance and bearing angle to the landmark)
-        #Rk (process noise covariance matrix) is zero, landmarks are static
+        # Calculate Jacobian matrix for the measurement function
         dx = landmark_x - x
         dy = landmark_y - y
-        predicted_distance = math.sqrt(dx**2 + dy**2)
-        predicted_angle = math.atan2(dy, dx) - theta
-        
-        # Normalize the angle between -pi and pi
-        predicted_angle = (predicted_angle + np.pi) % (2 * np.pi) - np.pi
-        
-        # Measurement noise covariance matrix (tunes itself dynamically based on distance and pixel error) -> Landmark correction step based on measurement model
-
-        # Calculate Jacobian matrix H of the measurement function for the EKF
         q = dx**2 + dy**2
-        sqrt_q = math.sqrt(q)
+        sqrt_q = math.sqrt(max(q, 0.0001))  # Prevent division by zero
 
         J = np.array([[dx / sqrt_q, dy / sqrt_q, 0],
                       [-dy / q, dx / q, -1]])
 
-        # Q = self.Q_init  # Example values, Q is Q_t in the book
+        # Get dynamic measurement covariance
         Q = self.get_dynamic_measurement_covariance(distance, marker_pixel_size)
+        
+        # Initialize landmark covariance
+        # Start with moderate uncertainty (not too high, not too low)
+        initial_sigma = np.eye(3) * 10.0  # Reduced from 1000
+        
         # innovation covariance
-        S = J @ self.landmarks[landmark_id].sigma @ J.T + Q
+        S = J @ initial_sigma @ J.T + Q
         # kalman gain
-        K = self.landmarks[landmark_id].sigma @ J.T @ np.linalg.inv(S)
+        K = initial_sigma @ J.T @ np.linalg.inv(S)
         # update covariance
-        self.landmarks[landmark_id].sigma = (np.eye(3) - K @ J) @ self.landmarks[landmark_id].sigma
+        self.landmarks[landmark_id].sigma = (np.eye(3) - K @ J) @ initial_sigma
                 
         # Set a default importance weight
-        self.weight = self.default_weight  # p0 in the book
+        self.weight = self.default_weight
 
     def update_landmark(self, distance, angle, landmark_id, marker_pixel_size):
         """
         Updates an existing landmark using the EKF update step.
-        Args:
-            distance: Measured distance to the landmark.
-            angle: Measured bearing angle to the landmark.
-            landmark_id: Identifier of the landmark.
+        Enhanced with better numerical stability.
         """
         landmark = self.landmarks[str(landmark_id)]
         x, y, theta = self.pose
  
         # Landmark prediction of the measurement based on motion model
-        #Rk (process noise covariance matrix) is zero, landmarks are static
         dx = landmark.x - x
         dy = landmark.y - y
+        
+        # Prevent numerical issues with very close landmarks
+        if abs(dx) < 0.01 and abs(dy) < 0.01:
+            return
+        
         predicted_distance = math.sqrt(dx**2 + dy**2)
         predicted_angle = -math.atan2(dy, dx) - theta
-            
-        # Normalize the angle between -pi and pi
-        predicted_angle = (predicted_angle + np.pi) % (2 * np.pi) - np.pi
-            
-        # Measurement noise covariance matrix (tunes itself dynamically based on distance and pixel error) -> correction step based on measuremet model
+        predicted_angle = normalize_angle(predicted_angle)
 
-        # 1)Calculate Jacobian matrix H of the measurement function
+        # Calculate Jacobian matrix
         q = dx**2 + dy**2
-        sqrt_q = math.sqrt(q)
+        sqrt_q = math.sqrt(max(q, 0.0001))
             
         J = np.array([[dx / sqrt_q, dy / sqrt_q, 0],
                       [dy / q, -dx / q, -1]])
 
-        # Q = self.Q_update  # Example values
+        # Get dynamic measurement covariance
         Q = self.get_dynamic_measurement_covariance(distance, marker_pixel_size)
 
-        # 2)Calculate the Kalman Gain
-        S = J @ landmark.sigma @ J.T + Q  # Measurement prediction covariance
-        K = landmark.sigma @ J.T @ np.linalg.inv(S)  # S is Q in the book
+        # Calculate the Kalman Gain with regularization
+        S = J @ landmark.sigma @ J.T + Q
+        S += np.eye(2) * 1e-6  # Regularization
+        
+        try:
+            S_inv = np.linalg.inv(S)
+        except np.linalg.LinAlgError:
+            # Use pseudo-inverse if singular
+            S_inv = np.linalg.pinv(S)
+        
+        K = landmark.sigma @ J.T @ S_inv
 
-        # 3)Innovation (measurement residual)
-        innovation = np.array([distance - predicted_distance, angle - predicted_angle])
+        # Innovation (measurement residual)
+        innovation = np.array([distance - predicted_distance, 
+                              normalize_angle(angle - predicted_angle)])
+        
+        # Limit innovation magnitude to prevent jumps
+        max_position_innovation = 0.5  # 50cm max update
+        max_angle_innovation = np.radians(30)  # 30 degrees max
+        
+        innovation[0] = np.clip(innovation[0], -max_position_innovation, max_position_innovation)
+        innovation[1] = np.clip(innovation[1], -max_angle_innovation, max_angle_innovation)
     
-        # 4)Update landmark state (x and y coordinate)
-        landmark.x += K[0, 0] * innovation[0] + K[0, 1] * innovation[1]
-        landmark.y += K[1, 0] * innovation[0] + K[1, 1] * innovation[1]
+        # Update landmark state
+        update = K @ innovation
+        landmark.x += update[0]
+        landmark.y += update[1]
             
-        # 5)Update the covariance
-        I = np.eye(3)  # Identity matrix
+        # Update the covariance
+        I = np.eye(3)
         landmark.sigma = (I - K @ J) @ landmark.sigma
+        
+        # Ensure covariance remains positive definite
+        # Add small diagonal to maintain numerical stability
+        landmark.sigma += np.eye(3) * 1e-6
 
-        #6) Update the weight using the measurement likelihood
+        # Update the weight using the measurement likelihood
         det_S = np.linalg.det(S)
-        if det_S > 0:
+        if det_S > 1e-10:  # Check for numerical stability
             weight_factor = 1 / np.sqrt(2 * np.pi * det_S)
-            exponent = -0.5 * innovation.T @ np.linalg.inv(S) @ innovation
+            exponent = -0.5 * innovation.T @ S_inv @ innovation
+            
+            # Limit exponent to prevent numerical overflow
+            exponent = max(exponent, -50)
+            
             self.weight *= weight_factor * np.exp(exponent)
+        else:
+            # If determinant too small, use a small weight update
+            self.weight *= 0.1
 
     ## POSE ##
     def get_pose(self):
