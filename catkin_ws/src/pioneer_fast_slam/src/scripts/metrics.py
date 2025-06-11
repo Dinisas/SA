@@ -11,8 +11,7 @@ from collections import defaultdict
 class SLAMMetricsTracker:
     """
     Comprehensive metrics tracking for FastSLAM implementation.
-    Handles all performance evaluation metrics including ATE, SSE, computational timing,
-    particle diversity, and landmark stability.
+    Enhanced with ground truth trajectory support and additional metrics.
     """
     
     def __init__(self, num_particles, groundtruth_file, expected_update_rate=10.0):
@@ -31,12 +30,14 @@ class SLAMMetricsTracker:
         
         # Ground truth data
         self.ground_truth_markers = {}
-        self.load_ground_truth_markers()
+        self.ground_truth_trajectory = []  # Ground truth robot trajectory
+        self.load_ground_truth_data()
         
         # ATE and trajectory metrics
         self.ate_values = []
+        self.msp_values = []  # Mean Squared Position error
+        self.eta_values = []  # Estimated Trajectory Accuracy
         self.robot_trajectory = []
-        self.ground_truth_trajectory = []
         
         # SSE and Kabsch alignment metrics
         self.sse_values = []
@@ -68,26 +69,228 @@ class SLAMMetricsTracker:
         self.landmark_stability = {}
         self.consecutive_detections = {}
         self.landmark_first_seen = {}
+        
+        # Trajectory interpolation for alignment
+        self.trajectory_interpolator = None
     
-    def load_ground_truth_markers(self):
-        """Load ground truth marker positions from YAML file."""
+    def load_ground_truth_data(self):
+        """Load ground truth marker positions and trajectory from YAML file."""
         try:     
             with open(self.groundtruth_file, 'r') as file:
                 data = yaml.safe_load(file)
-                
+            
+            # Load markers
             if 'markers' in data:
                 for marker_id, coords in data['markers'].items():
                     self.ground_truth_markers[str(marker_id)] = coords
                 rospy.loginfo(f"Loaded {len(self.ground_truth_markers)} ground truth markers")
             else:
                 rospy.logwarn("No 'markers' section found in ground truth YAML")
+            
+            # Load trajectory if available
+            if 'positions' in data:
+                # Handle different trajectory formats
+                positions = data['positions']
+                if isinstance(positions, list):
+                    for pos in positions:
+                        if isinstance(pos, list) and len(pos) >= 2:
+                            # Add default orientation if not provided
+                            if len(pos) == 2:
+                                self.ground_truth_trajectory.append((pos[0], pos[1], 0.0))
+                            else:
+                                self.ground_truth_trajectory.append((pos[0], pos[1], pos[2]))
+                rospy.loginfo(f"Loaded {len(self.ground_truth_trajectory)} ground truth trajectory points")
+            else:
+                rospy.logwarn("No 'positions' section found in ground truth YAML")
                 
         except Exception as e:
-            rospy.logerr(f"Error loading ground truth markers: {e}")
+            rospy.logerr(f"Error loading ground truth data: {e}")
     
     def update_robot_trajectory(self, x, y, theta):
         """Add a new pose to the robot trajectory."""
         self.robot_trajectory.append((x, y, theta))
+        
+        # Calculate trajectory-based metrics if ground truth is available
+        if self.ground_truth_trajectory and len(self.robot_trajectory) > 1:
+            self.calculate_trajectory_metrics()
+    
+    def calculate_trajectory_metrics(self):
+        """Calculate MSP and ETA metrics based on current trajectory."""
+        if not self.ground_truth_trajectory or not self.robot_trajectory:
+            return
+        
+        # Calculate MSP (Mean Squared Position error)
+        msp = self.calculate_msp()
+        if msp is not None:
+            self.msp_values.append(msp)
+        
+        # Calculate ETA (Estimated Trajectory Accuracy)
+        eta = self.calculate_eta()
+        if eta is not None:
+            self.eta_values.append(eta)
+    
+    def calculate_msp(self):
+        """
+        Calculate Mean Squared Position error between estimated and ground truth trajectories.
+        
+        Returns:
+            MSP value or None if calculation not possible
+        """
+        if len(self.robot_trajectory) < 2 or len(self.ground_truth_trajectory) < 2:
+            return None
+        
+        # Align trajectories by length (take minimum length)
+        min_length = min(len(self.robot_trajectory), len(self.ground_truth_trajectory))
+        
+        total_squared_error = 0.0
+        valid_points = 0
+        
+        for i in range(min_length):
+            est_x, est_y, _ = self.robot_trajectory[i]
+            gt_x, gt_y, _ = self.ground_truth_trajectory[i]
+            
+            # Calculate squared Euclidean distance
+            squared_error = (est_x - gt_x)**2 + (est_y - gt_y)**2
+            total_squared_error += squared_error
+            valid_points += 1
+        
+        if valid_points > 0:
+            msp = total_squared_error / valid_points
+            return msp
+        
+        return None
+    
+    def calculate_eta(self):
+        """
+        Calculate Estimated Trajectory Accuracy (ETA).
+        ETA is defined as the percentage of trajectory points within acceptable error threshold.
+        
+        Returns:
+            ETA value (percentage) or None if calculation not possible
+        """
+        if len(self.robot_trajectory) < 2 or len(self.ground_truth_trajectory) < 2:
+            return None
+        
+        # Error threshold for considering a point "accurate" (in meters)
+        error_threshold = 0.5  # 50cm threshold
+        
+        min_length = min(len(self.robot_trajectory), len(self.ground_truth_trajectory))
+        
+        accurate_points = 0
+        total_points = 0
+        
+        for i in range(min_length):
+            est_x, est_y, _ = self.robot_trajectory[i]
+            gt_x, gt_y, _ = self.ground_truth_trajectory[i]
+            
+            # Calculate Euclidean distance
+            error = math.sqrt((est_x - gt_x)**2 + (est_y - gt_y)**2)
+            
+            if error <= error_threshold:
+                accurate_points += 1
+            
+            total_points += 1
+        
+        if total_points > 0:
+            eta = (accurate_points / total_points) * 100.0  # Convert to percentage
+            return eta
+        
+        return None
+    
+    def interpolate_ground_truth_trajectory(self, estimated_trajectory):
+        """
+        Interpolate ground truth trajectory to match the length of estimated trajectory.
+        This provides better trajectory comparison when trajectories have different lengths.
+        
+        Args:
+            estimated_trajectory: List of (x, y, theta) tuples
+            
+        Returns:
+            Interpolated ground truth trajectory
+        """
+        if not self.ground_truth_trajectory or not estimated_trajectory:
+            return []
+        
+        if len(self.ground_truth_trajectory) <= 1:
+            return self.ground_truth_trajectory
+        
+        # Create parameter arrays for interpolation
+        gt_length = len(self.ground_truth_trajectory)
+        est_length = len(estimated_trajectory)
+        
+        # Parameter arrays (0 to 1)
+        gt_params = np.linspace(0, 1, gt_length)
+        est_params = np.linspace(0, 1, est_length)
+        
+        # Extract coordinates
+        gt_x = [pos[0] for pos in self.ground_truth_trajectory]
+        gt_y = [pos[1] for pos in self.ground_truth_trajectory]
+        gt_theta = [pos[2] if len(pos) > 2 else 0.0 for pos in self.ground_truth_trajectory]
+        
+        # Interpolate
+        interp_x = np.interp(est_params, gt_params, gt_x)
+        interp_y = np.interp(est_params, gt_params, gt_y)
+        interp_theta = np.interp(est_params, gt_params, gt_theta)
+        
+        # Return interpolated trajectory
+        return [(x, y, theta) for x, y, theta in zip(interp_x, interp_y, interp_theta)]
+    
+    def calculate_advanced_trajectory_metrics(self, best_particle_trajectory):
+        """
+        Calculate advanced trajectory metrics using interpolated ground truth.
+        
+        Args:
+            best_particle_trajectory: Trajectory from the best particle
+            
+        Returns:
+            Dictionary containing advanced metrics
+        """
+        if not best_particle_trajectory or not self.ground_truth_trajectory:
+            return {}
+        
+        # Interpolate ground truth to match estimated trajectory length
+        interpolated_gt = self.interpolate_ground_truth_trajectory(best_particle_trajectory)
+        
+        if not interpolated_gt:
+            return {}
+        
+        metrics = {}
+        
+        # Calculate position errors
+        position_errors = []
+        orientation_errors = []
+        
+        min_length = min(len(best_particle_trajectory), len(interpolated_gt))
+        
+        for i in range(min_length):
+            est_x, est_y, est_theta = best_particle_trajectory[i]
+            gt_x, gt_y, gt_theta = interpolated_gt[i]
+            
+            # Position error
+            pos_error = math.sqrt((est_x - gt_x)**2 + (est_y - gt_y)**2)
+            position_errors.append(pos_error)
+            
+            # Orientation error (normalized)
+            theta_diff = est_theta - gt_theta
+            while theta_diff > math.pi:
+                theta_diff -= 2 * math.pi
+            while theta_diff < -math.pi:
+                theta_diff += 2 * math.pi
+            orientation_errors.append(abs(theta_diff))
+        
+        if position_errors:
+            metrics['advanced_msp'] = np.mean(np.array(position_errors)**2)
+            metrics['trajectory_rmse'] = np.sqrt(metrics['advanced_msp'])
+            metrics['max_position_error'] = max(position_errors)
+            metrics['min_position_error'] = min(position_errors)
+            metrics['std_position_error'] = np.std(position_errors)
+        
+        if orientation_errors:
+            metrics['mean_orientation_error'] = np.mean(orientation_errors)
+            metrics['max_orientation_error'] = max(orientation_errors)
+            metrics['std_orientation_error'] = np.std(orientation_errors)
+        
+        return metrics
     
     def record_timing(self, operation_name, duration):
         """Record timing for a specific operation."""
@@ -369,7 +572,7 @@ class SLAMMetricsTracker:
         }
     
     def get_current_metrics(self):
-        """Return comprehensive performance metrics."""
+        """Return comprehensive performance metrics including new trajectory metrics."""
         timing_stats = self.get_timing_statistics()
         diversity_stats = self.get_particle_diversity_stats()
         
@@ -377,6 +580,12 @@ class SLAMMetricsTracker:
             # Trajectory error metrics
             'current_mpd': self.ate_values[-1] if self.ate_values else 0.0,
             'average_mpd': sum(self.ate_values) / len(self.ate_values) if self.ate_values else 0.0,
+            
+            # NEW: MSP and ETA metrics
+            'current_msp': self.msp_values[-1] if self.msp_values else 0.0,
+            'average_msp': sum(self.msp_values) / len(self.msp_values) if self.msp_values else 0.0,
+            'current_eta': self.eta_values[-1] if self.eta_values else 0.0,
+            'average_eta': sum(self.eta_values) / len(self.eta_values) if self.eta_values else 0.0,
             
             # Mapping accuracy metrics
             'current_sse': self.sse_values[-1] if self.sse_values else 0.0,
@@ -392,6 +601,7 @@ class SLAMMetricsTracker:
             
             # General metrics
             'trajectory_length': len(self.robot_trajectory),
+            'ground_truth_trajectory_length': len(self.ground_truth_trajectory),
             'particles_count': self.num_particles,
             
             # Advanced metrics
@@ -418,7 +628,11 @@ class SLAMMetricsTracker:
                 f.write("TRAJECTORY ERROR ANALYSIS\n")
                 f.write("-" * 30 + "\n")
                 f.write(f"Current ATE: {metrics['current_mpd']:.6f} meters\n")
-                f.write(f"Average ATE: {metrics['average_mpd']:.6f} meters\n\n")
+                f.write(f"Average ATE: {metrics['average_mpd']:.6f} meters\n")
+                f.write(f"Current MSP: {metrics['current_msp']:.6f} m²\n")
+                f.write(f"Average MSP: {metrics['average_msp']:.6f} m²\n")
+                f.write(f"Current ETA: {metrics['current_eta']:.2f}%\n")
+                f.write(f"Average ETA: {metrics['average_eta']:.2f}%\n\n")
                 
                 # Mapping Accuracy
                 f.write("MAPPING ACCURACY (After Kabsch Alignment)\n")
@@ -433,6 +647,12 @@ class SLAMMetricsTracker:
                 f.write("-" * 20 + "\n")
                 f.write(f"Detection Rate: {metrics['detection_rate']:.1f}%\n")
                 f.write(f"Landmarks Detected: {metrics['landmarks_detected']}/{metrics['total_ground_truth']}\n\n")
+                
+                # Trajectory Information
+                f.write("TRAJECTORY INFORMATION\n")
+                f.write("-" * 21 + "\n")
+                f.write(f"Estimated Trajectory Length: {metrics['trajectory_length']} points\n")
+                f.write(f"Ground Truth Trajectory Length: {metrics['ground_truth_trajectory_length']} points\n\n")
                 
                 # Particle Filter Performance
                 f.write("PARTICLE FILTER PERFORMANCE\n")
@@ -466,49 +686,23 @@ class SLAMMetricsTracker:
                         f.write(f"{stats['mean']:.2f} ± {stats['std']:.2f} ms\n")
                 f.write("\n")
                 
-                # Landmark Stability Analysis
-                f.write("LANDMARK STABILITY ANALYSIS\n")
-                f.write("-" * 30 + "\n")
-                stability = metrics['landmark_stability']
-                f.write(f"Total Landmarks Tracked: {stability['total_landmarks']}\n")
-                f.write(f"Stable Landmarks (5+ consecutive detections): {stability['stable_landmarks']}\n")
-                if stability['total_landmarks'] > 0:
-                    stability_rate = (stability['stable_landmarks'] / stability['total_landmarks']) * 100
-                    f.write(f"Stability Rate: {stability_rate:.1f}%\n")
-                f.write("\n")
-                
-                f.write("Per-Landmark Stability Details:\n")
-                for marker_id, details in stability['stability_details'].items():
-                    f.write(f"  Marker {marker_id}:\n")
-                    f.write(f"    Consecutive detections: {details['consecutive_detections']}\n")
-                    f.write(f"    Time tracked: {details['time_tracked']:.2f} seconds\n")
-                f.write("\n")
-                
-                # Per-Landmark Errors
-                f.write("Per-Landmark Errors (After Alignment):\n")
-                f.write("-" * 40 + "\n")
-                for marker_id, error in metrics['per_landmark_errors'].items():
-                    f.write(f"Marker {marker_id}: {error:.6f} meters\n")
-                f.write("\n")
-                
                 # Historical Data Summary
-                if self.sse_values:
-                    f.write("Historical Performance Summary:\n")
-                    f.write("SSE History (last 10 values):\n")
-                    recent_sses = self.sse_values[-10:]
-                    for i, sse in enumerate(recent_sses):
-                        idx = len(self.sse_values) - len(recent_sses) + i + 1
-                        f.write(f"  {idx}: {sse:.6f} m²\n")
+                if self.msp_values:
+                    f.write("MSP History (last 10 values):\n")
+                    recent_msp = self.msp_values[-10:]
+                    for i, msp in enumerate(recent_msp):
+                        idx = len(self.msp_values) - len(recent_msp) + i + 1
+                        f.write(f"  {idx}: {msp:.6f} m²\n")
                 f.write("\n")
                 
-                if self.n_eff_history:
-                    f.write("n_eff History (last 10 values):\n")
-                    recent_neff = self.n_eff_history[-10:]
-                    for i, neff in enumerate(recent_neff):
-                        idx = len(self.n_eff_history) - len(recent_neff) + i + 1
-                        f.write(f"  {idx}: {neff:.2f}\n")
+                if self.eta_values:
+                    f.write("ETA History (last 10 values):\n")
+                    recent_eta = self.eta_values[-10:]
+                    for i, eta in enumerate(recent_eta):
+                        idx = len(self.eta_values) - len(recent_eta) + i + 1
+                        f.write(f"  {idx}: {eta:.2f}%\n")
                         
-            rospy.loginfo(f"Comprehensive metrics saved to {filename}")
+            rospy.loginfo(f"Enhanced metrics saved to {filename}")
         except Exception as e:
             rospy.logerr(f"Error saving metrics: {e}")
 

@@ -60,6 +60,7 @@ class FastSlam:
         self.CYAN = (0, 255, 255)
         self.LIME = (50, 205, 50)
         self.YELLOW = (255, 255, 0)
+        self.MAGENTA = (255, 0, 255)  # New color for ground truth trajectory
 
         # Screen and map dimensions
         self.screen = screen      
@@ -77,7 +78,7 @@ class FastSlam:
         self.particles = self.initialize_particles()
         self.landmark_pub = rospy.Publisher('/landmarks', MarkerArray, queue_size=10)
         
-        # Initialize the metrics tracker
+        # Initialize the enhanced metrics tracker
         self.metrics = SLAMMetricsTracker(num_particles=num_particles, groundtruth_file=groundtruth_file, expected_update_rate=30.0)
 
         # Font for displaying metrics
@@ -327,6 +328,25 @@ class FastSlam:
         # Update visualization
         self.update_screen(landmarks_in_sight)
 
+    def draw_ground_truth_trajectory(self):
+        """Draw ground truth trajectory from metrics tracker."""
+        if len(self.metrics.ground_truth_trajectory) > 1:
+            points = []
+            for x, y, _ in self.metrics.ground_truth_trajectory:
+                pixel_x = int(x * self.SCREEN_WIDTH / self.width_meters + 
+                            self.left_coordinate + self.SCREEN_WIDTH / 2)
+                pixel_y = int(y * self.SCREEN_HEIGHT / self.height_meters + 
+                            self.SCREEN_HEIGHT / 2)
+                points.append((pixel_x, pixel_y))
+            
+            if len(points) > 1:
+                # Draw ground truth trajectory with distinct color and style
+                pygame.draw.lines(self.screen, self.MAGENTA, False, points, 3)
+                
+                # Draw waypoints on ground truth trajectory
+                for i, point in enumerate(points[::2]):  # Every other point to avoid clutter
+                    pygame.draw.circle(self.screen, self.MAGENTA, point, 4)
+
     def draw_trajectory(self):
         """Draw robot trajectory from metrics tracker."""
         if len(self.metrics.robot_trajectory) > 1:
@@ -438,7 +458,7 @@ class FastSlam:
                             config['error_width'])
 
     def draw_metrics_panel(self):
-        """Draw performance metrics panel using metrics tracker."""
+        """Draw performance metrics panel using enhanced metrics tracker."""
         # Get current metrics
         current_metrics = self.metrics.get_current_metrics()
         diversity_stats = current_metrics['effective_particle_count']
@@ -446,8 +466,8 @@ class FastSlam:
         
         panel_x = 10
         panel_y = 10
-        panel_width = 500
-        panel_height = 480
+        panel_width = 520  # Increased width for new metrics
+        panel_height = 520  # Increased height
         
         # Draw background
         pygame.draw.rect(self.screen, (0, 0, 0, 180), 
@@ -458,7 +478,7 @@ class FastSlam:
         y_offset = panel_y + 10
         
         # Title
-        title = self.font.render("SLAM Performance Metrics", True, self.WHITE)
+        title = self.font.render("Enhanced SLAM Performance Metrics", True, self.WHITE)
         self.screen.blit(title, (panel_x + 10, y_offset))
         y_offset += 30
         
@@ -469,20 +489,40 @@ class FastSlam:
         self.screen.blit(robot_status, (panel_x + 10, y_offset))
         y_offset += 25
         
-        # Display metrics
-        metrics_to_display = [
-            (f"MPD: {current_metrics['current_mpd']:.3f}m", self.WHITE),
-            (f"SSE: {current_metrics['current_sse']:.3f}m²", self.WHITE),
+        # Display enhanced trajectory metrics
+        trajectory_metrics = [
+            (f"MPD (ATE): {current_metrics['current_mpd']:.3f}m", self.WHITE),
+            (f"MSP: {current_metrics['current_msp']:.3f}m²", self.CYAN),
+            (f"ETA: {current_metrics['current_eta']:.1f}%", self.MAGENTA),
             (f"RMSE: {current_metrics['current_rmse']:.3f}m", self.WHITE),
             (f"Detection Rate: {current_metrics['detection_rate']:.1f}%", self.WHITE),
         ]
         
-        for text, color in metrics_to_display:
+        for text, color in trajectory_metrics:
             text_surface = self.font.render(text, True, color)
             self.screen.blit(text_surface, (panel_x + 10, y_offset))
             y_offset += 20
         
         y_offset += 5
+        
+        # Trajectory Information Section
+        traj_title = self.font.render("Trajectory Information:", True, self.YELLOW)
+        self.screen.blit(traj_title, (panel_x + 10, y_offset))
+        y_offset += 20
+        
+        traj_info = [
+            f"Estimated Points: {current_metrics['trajectory_length']}",
+            f"Ground Truth Points: {current_metrics['ground_truth_trajectory_length']}",
+            f"Avg MSP: {current_metrics['average_msp']:.3f}m²",
+            f"Avg ETA: {current_metrics['average_eta']:.1f}%"
+        ]
+        
+        for text in traj_info:
+            text_surface = self.font.render(text, True, self.WHITE)
+            self.screen.blit(text_surface, (panel_x + 20, y_offset))
+            y_offset += 18
+        
+        y_offset += 7
         
         # Particle Diversity Section
         diversity_title = self.font.render("Particle Diversity:", True, self.CYAN)
@@ -543,12 +583,6 @@ class FastSlam:
         stability_text = (f"Stable Landmarks: "
                         f"{stability['stable_landmarks']}/{stability['total_landmarks']}")
         text_surface = self.font.render(stability_text, True, self.WHITE)
-        self.screen.blit(text_surface, (panel_x + 20, y_offset))
-        y_offset += 20
-        
-        # Trajectory points
-        traj_text = f"Trajectory points: {current_metrics['trajectory_length']}"
-        text_surface = self.font.render(traj_text, True, self.WHITE)
         self.screen.blit(text_surface, (panel_x + 20, y_offset))
 
     def _process_unique_id_landmarks(self, unique_id_landmarks):
@@ -693,6 +727,10 @@ class FastSlam:
             pygame.draw.rect(self.screen, self.WHITE, half_screen_rect)
             
             # Draw elements in order
+            # Draw ground truth trajectory FIRST (behind everything else)
+            self.draw_ground_truth_trajectory()
+            
+            # Draw estimated trajectory
             self.draw_trajectory()
            
             # Draw ground truth, estimated and aligned markers
@@ -716,37 +754,38 @@ class FastSlam:
 
             # Draw metrics and legend
             self.draw_metrics_panel()
-            self.draw_legend()
+            self.draw_enhanced_legend()
             
             pygame.display.flip()
             
         except Exception as e:
             rospy.logerr(f"Error updating screen: {e}")
 
-    def draw_legend(self):
-        """Draw a legend explaining the colors."""
-        legend_x = self.SCREEN_WIDTH - 250
+    def draw_enhanced_legend(self):
+        """Draw an enhanced legend explaining the colors and new metrics."""
+        legend_x = self.SCREEN_WIDTH - 280
         legend_y = 10
         
         # Background
-        pygame.draw.rect(self.screen, (0, 0, 0, 128), (legend_x, legend_y, 230, 180))
-        pygame.draw.rect(self.screen, self.WHITE, (legend_x, legend_y, 230, 180), 1)
+        pygame.draw.rect(self.screen, (0, 0, 0, 128), (legend_x, legend_y, 260, 220))
+        pygame.draw.rect(self.screen, self.WHITE, (legend_x, legend_y, 260, 220), 1)
         
         y_pos = legend_y + 10
         
         # Title
-        title = self.font.render("Legend:", True, self.WHITE)
+        title = self.font.render("Enhanced Legend:", True, self.WHITE)
         self.screen.blit(title, (legend_x + 10, y_pos))
         y_pos += 25
         
         # Legend items
         legend_items = [
-            ("Ground Truth", self.ORANGE),
-            ("Estimated", self.PURPLE),
+            ("Ground Truth Markers", self.ORANGE),
+            ("Estimated Markers", self.PURPLE),
             ("Kabsch Aligned", self.LIME),
+            ("Ground Truth Trajectory", self.MAGENTA),
+            ("Estimated Trajectory", self.CYAN),
             ("Robot (Moving)", self.GREEN),
             ("Robot (Stationary)", self.ORANGE),
-            ("Trajectory", self.CYAN),
             ("Error Lines", self.RED)
         ]
         
@@ -757,14 +796,30 @@ class FastSlam:
             text_surface = self.small_font.render(text, True, self.WHITE)
             self.screen.blit(text_surface, (legend_x + 30, y_pos))
             y_pos += 20
+        
+        # Add new metrics explanation
+        y_pos += 10
+        metrics_title = self.small_font.render("New Metrics:", True, self.YELLOW)
+        self.screen.blit(metrics_title, (legend_x + 10, y_pos))
+        y_pos += 18
+        
+        metric_explanations = [
+            "MSP: Mean Squared Position",
+            "ETA: Est. Trajectory Accuracy"
+        ]
+        
+        for text in metric_explanations:
+            text_surface = self.small_font.render(text, True, self.WHITE)
+            self.screen.blit(text_surface, (legend_x + 15, y_pos))
+            y_pos += 16
 
     def get_best_trajectory(self):
         return self.particles[self.best_particle_ID].trajectory
 
     def get_current_metrics(self):
-        """Return comprehensive performance metrics from the metrics tracker."""
+        """Return comprehensive performance metrics from the enhanced metrics tracker."""
         return self.metrics.get_current_metrics()
     
-    def save_metrics_to_file(self, filename="slam_comprehensive_metrics.txt"):
+    def save_metrics_to_file(self, filename="slam_enhanced_metrics.txt"):
         """Save comprehensive performance metrics to a file."""
         self.metrics.save_metrics_to_file(filename)

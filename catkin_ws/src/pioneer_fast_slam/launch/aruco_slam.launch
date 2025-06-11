@@ -1,12 +1,14 @@
 <launch>
-  <!-- Arguments -->
+ <!-- Arguments -->
   <arg name="rosbag" default="simulation1.bag" doc="Rosbag file to use for playback"/>
   <arg name="rviz" default="true" doc="Set to false to not launch rviz"/>
-  <arg name="particles" default="50" doc="Number of particles for FastSLAM Algorithm (default increased from 25)"/>
-  <arg name="groundtruth" default="simulation3.yaml" doc="Ground truth of aruco markers for evaluation"/>
-  <arg name="update_rate" default="30" doc="Target update rate in Hz (default 30Hz)"/>
-  <arg name="playback_rate" default="1.0" doc="Rosbag playback rate (1.0 = normal speed)"/>
+  <arg name="particles" default="50" doc="Number of particles for FastSLAM Algorithm"/>
+  <arg name="groundtruth" default="simulation3.yaml" doc="Ground truth file for evaluation"/>
+  <arg name="update_rate" default="30" doc="Target update rate in Hz"/>
+  <arg name="playback_rate" default="1.0" doc="Rosbag playback rate"/>
   
+    <node pkg="pioneer_fast_slam" type="list_groundtruth.py" name="list_groundtruth" output="screen" />
+
   <!-- Main ArucoSLAM Node -->
   <node pkg="pioneer_fast_slam" type="main.py" name="start" output="screen">
      <param name="~rosbag" value="$(arg rosbag)"/>

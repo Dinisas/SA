@@ -93,6 +93,10 @@ class ArucoSLAM:
         self.start_time = time.time()
         self.last_metrics_save = time.time()
         self.metrics_save_interval = 30.0
+        
+        # Enhanced metrics logging
+        self.last_msp_eta_log = time.time()
+        self.msp_eta_log_interval = 10.0  # Log MSP and ETA every 10 seconds
 
     def create_slam(self, window_size_pixel, size_m, tunning_options, number_particles, groundtruth_file):
         pioneer_L = 0.33
@@ -270,10 +274,27 @@ class ArucoSLAM:
                 self.accumulated_motion = {'linear': 0.0, 'angular': 0.0}
                 self.last_update_time = current_time
                 
+                # Log enhanced metrics periodically
+                if current_time - self.last_msp_eta_log > self.msp_eta_log_interval:
+                    self.log_enhanced_metrics()
+                    self.last_msp_eta_log = current_time
+                
                 # Log update info
                 if self.callback_count % 100 == 0:
                     rospy.loginfo(f"Update #{self.callback_count}: Moving={self.robot_moving}, "
                                   f"Measurements={len(self.measurement_buffer)}")
+
+    def log_enhanced_metrics(self):
+        """Log enhanced metrics including MSP and ETA."""
+        metrics = self.my_slam.get_current_metrics()
+        
+        rospy.loginfo("=== Enhanced SLAM Metrics ===")
+        rospy.loginfo(f"MSP (Mean Squared Position): {metrics.get('current_msp', 0.0):.6f} m²")
+        rospy.loginfo(f"ETA (Est. Trajectory Accuracy): {metrics.get('current_eta', 0.0):.2f}%")
+        rospy.loginfo(f"ATE (Absolute Trajectory Error): {metrics.get('current_mpd', 0.0):.6f} m")
+        rospy.loginfo(f"Ground Truth Trajectory Points: {metrics.get('ground_truth_trajectory_length', 0)}")
+        rospy.loginfo(f"Estimated Trajectory Points: {metrics.get('trajectory_length', 0)}")
+        rospy.loginfo("============================")
 
     def calibrate_camera(self):
         try:
@@ -324,10 +345,16 @@ class ArucoSLAM:
             callback_rate = self.callback_count / elapsed_time
             metrics = self.my_slam.get_current_metrics()
             
-            rospy.loginfo("=== FastSLAM Performance Summary ===")
+            rospy.loginfo("=== Enhanced FastSLAM Performance Summary ===")
             rospy.loginfo(f"Runtime: {elapsed_time:.1f}s, Updates: {self.callback_count}")
             rospy.loginfo(f"Effective Update Rate: {callback_rate:.2f} Hz")
             rospy.loginfo(f"Target Update Rate: {self.update_rate:.2f} Hz")
+            
+            # Enhanced trajectory metrics
+            rospy.loginfo(f"Current MSP: {metrics.get('current_msp', 0.0):.6f} m²")
+            rospy.loginfo(f"Average MSP: {metrics.get('average_msp', 0.0):.6f} m²")
+            rospy.loginfo(f"Current ETA: {metrics.get('current_eta', 0.0):.2f}%")
+            rospy.loginfo(f"Average ETA: {metrics.get('average_eta', 0.0):.2f}%")
             
             if 'effective_particle_count' in metrics:
                 diversity = metrics['effective_particle_count']
@@ -335,11 +362,22 @@ class ArucoSLAM:
             
             rospy.loginfo(f"Detection Rate: {metrics['detection_rate']:.1f}%")
             rospy.loginfo(f"Current RMSE: {metrics['current_rmse']:.3f}m")
+            
+            # Ground truth information
+            rospy.loginfo(f"Ground Truth Trajectory Length: {metrics.get('ground_truth_trajectory_length', 0)}")
+            rospy.loginfo(f"Estimated Trajectory Length: {metrics.get('trajectory_length', 0)}")
 
     def run(self):
         start_time = rospy.Time.now()
         last_performance_log = time.time()
         performance_log_interval = 60.0
+        
+        # Log initial ground truth information
+        metrics = self.my_slam.get_current_metrics()
+        rospy.loginfo("=== Ground Truth Information ===")
+        rospy.loginfo(f"Ground Truth Markers: {metrics.get('total_ground_truth', 0)}")
+        rospy.loginfo(f"Ground Truth Trajectory Points: {metrics.get('ground_truth_trajectory_length', 0)}")
+        rospy.loginfo("================================")
         
         # Create a rate object for the main loop
         rate = rospy.Rate(self.update_rate * 2)  # Run at 2x update rate to ensure we don't miss updates
@@ -364,28 +402,31 @@ class ArucoSLAM:
             # Periodic metrics saving
             if (current_time - self.last_metrics_save) > self.metrics_save_interval:
                 timestamp = int(current_time)
-                metrics_filename = f"slam_metrics_{timestamp}.txt"
+                metrics_filename = f"slam_enhanced_metrics_{timestamp}.txt"
                 self.my_slam.save_metrics_to_file(metrics_filename)
-                rospy.loginfo(f"Periodic metrics saved to {metrics_filename}")
+                rospy.loginfo(f"Enhanced metrics saved to {metrics_filename}")
                 self.last_metrics_save = current_time
             
             # Check if rosbag finished
             if self.rosbag_finished(start_time, self.k):
-                rospy.loginfo("Rosbag playback finished. Performing final analysis...")
+                rospy.loginfo("Rosbag playback finished. Performing final enhanced analysis...")
                 
-                # Save final metrics
-                final_metrics_filename = f"final_slam_metrics_{int(time.time())}.txt"
+                # Save final enhanced metrics
+                final_metrics_filename = f"final_enhanced_slam_metrics_{int(time.time())}.txt"
                 self.my_slam.save_metrics_to_file(final_metrics_filename)
                 
-                # Log final performance
+                # Log final enhanced performance
                 self.log_performance_summary()
                 
                 final_metrics = self.my_slam.get_current_metrics()
-                rospy.loginfo("=== Final SLAM Results ===")
-                rospy.loginfo(f"Final ATE: {final_metrics.get('current_ate', 0.0):.4f}m")
+                rospy.loginfo("=== Final Enhanced SLAM Results ===")
+                rospy.loginfo(f"Final ATE: {final_metrics.get('current_mpd', 0.0):.4f}m")
+                rospy.loginfo(f"Final MSP: {final_metrics.get('current_msp', 0.0):.6f}m²")
+                rospy.loginfo(f"Final ETA: {final_metrics.get('current_eta', 0.0):.2f}%")
                 rospy.loginfo(f"Final RMSE: {final_metrics['current_rmse']:.4f}m")
                 rospy.loginfo(f"Total Landmarks Mapped: {final_metrics['landmarks_detected']}")
                 rospy.loginfo(f"Detection Success Rate: {final_metrics['detection_rate']:.1f}%")
+                rospy.loginfo(f"Ground Truth vs Estimated Trajectory Points: {final_metrics.get('ground_truth_trajectory_length', 0)}/{final_metrics.get('trajectory_length', 0)}")
                 
                 rospy.signal_shutdown("Rosbag playback finished")
                 break
