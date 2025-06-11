@@ -1,61 +1,57 @@
-# ENHANCED GROUND TRUTH YAML FORMAT - X TRAJECTORY
-# Now includes both marker positions and trajectory data for comprehensive evaluation
+# MIXED FORMAT GROUND TRUTH YAML - Some positions with theta, some without
+# Demonstrates the system's flexibility to handle both formats
 
-# Ground truth ArUco marker positions (relative to robot's starting position)
-# Coordinates are in meters, with robot start as origin (0,0)
+# Ground truth ArUco marker positions
 markers:
-  4: [1.94, -0.71]   # Marker ID 4 at specified position
-  2: [2.46, 0.89]    # Marker ID 2 at specified position
-  5: [3.20, -0.71]   # Marker ID 5 at specified position
-  6: [3.17, 0.89]    # Marker ID 6 at specified position
-  0: [4.82, -0.86]   # Marker ID 0 at specified position
-  1: [5.18, -0.25]   # Marker ID 1 at specified position
-  7: [5.18, 0.8]     # Marker ID 7 at specified position
-  8: [3.51, 2.52]    # Marker ID 8 at specified position
-  9: [5.02, 3.59]    # Marker ID 9 at specified position
-  3: [3.71, 3.59]    # Marker ID 3 at specified position
+  4: [1.94, -0.71]   
+  2: [2.46, 0.89]    
+  5: [3.20, -0.71]   
+  6: [3.17, 0.89]    
+  0: [4.82, -0.86]   
+  1: [5.18, -0.25]   
+  7: [5.18, 0.8]     
+  8: [3.51, 2.52]    
+  9: [5.02, 3.59]    
+  3: [3.71, 3.59]    
 
-# Ground truth robot trajectory positions (X PATH)
-# List of [x, y, theta] positions representing the true robot path
-# Theta estimated based on movement direction between waypoints
+# Mixed trajectory format - some with theta, some without
+# The system will calculate missing theta values automatically
 positions:
-  - [0.0, 0.0, 0.0]        # Starting position
-  - [2.47, 0.035, 0.0]     # Moving east
-  - [4.27, 0.07, 0.0]      # Continuing east
-  - [4.74, 0.18, 0.4]      # Slight turn northeast
-  - [4.83, 1.1, 1.5]       # Moving north
-  - [4.45, 1.58, 2.3]      # Moving northwest
-  - [4.61, 2.42, 1.8]      # Moving northeast (completing X shape)
+  - [0.0, 0.0, 0.0]        # Starting position with explicit theta
+  - [0.58, 0.27]           # Position without theta - will be calculated
+  - [1.11, 0.46, 0.3]      # Position with explicit theta
+  - [2.01, 0.53]           # Position without theta - will be calculated
+  - [3.47, 0.63]           # Position without theta - will be calculated
+  - [3.92, 0.55, 0.5]      # Position with explicit theta
+  - [4.01, 0.82]           # Position without theta - will be calculated
+  - [3.96, 1.65, 1.5]      # Position with explicit theta
+  - [3.875, 2.605]         # Final position without theta - will be calculated
 
-# Robot starting position (reference point)
-robot_start: [0.0, 0.0, 0.0]
+robot_start: [0.0, 0.0]
 
-# Enhanced metadata for better tracking
 measurement_info:
   map_scale: "1:100"
   measurement_tool: "ruler"
   date_measured: "2024-12-XX"
-  notes: "Enhanced ground truth X trajectory with trajectory data for MSP/ETA calculation"
+  notes: "Mixed format demonstration - some positions have theta, others are calculated automatically"
 
-# Trajectory collection information
 trajectory_info:
   collection_method: "manual_measurement"
   sampling_rate: "variable"
   coordinate_system: "robot_local"
-  trajectory_shape: "diagonal_X"
-  notes: "X-shaped trajectory points collected during robot operation for accuracy evaluation"
+  trajectory_shape: "square_mixed"
+  theta_calculation: "mixed_auto_manual"
+  notes: "Demonstrates flexibility: [x,y,theta] or [x,y] formats both supported"
 
-# Expected evaluation metrics
 expected_metrics:
   target_msp_threshold: 0.1
   target_eta_threshold: 80.0
   target_detection_rate: 90.0
 
-# Experiment configuration
 experiment_config:
   robot_type: "Pioneer 3DX"
   sensor_type: "camera_aruco"
   environment: "indoor_lab"
   particle_count: 50
   update_rate_hz: 30
-  trajectory_type: "diagonal_X"
+  trajectory_type: "mixed_format_demo"

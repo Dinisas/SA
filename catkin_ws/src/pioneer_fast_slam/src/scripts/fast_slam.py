@@ -328,263 +328,299 @@ class FastSlam:
         # Update visualization
         self.update_screen(landmarks_in_sight)
 
-    def draw_ground_truth_trajectory(self):
-        """Draw ground truth trajectory from metrics tracker."""
-        if len(self.metrics.ground_truth_trajectory) > 1:
-            points = []
-            for x, y, _ in self.metrics.ground_truth_trajectory:
+# Updated drawing functions for fast_slam.py
+# These functions should replace the corresponding functions in your fast_slam.py file
+
+def draw_ground_truth_trajectory(self):
+    """Draw ground truth trajectory from metrics tracker."""
+    if len(self.metrics.ground_truth_trajectory) > 1:
+        points = []
+        for position in self.metrics.ground_truth_trajectory:
+            # Handle both (x, y, theta) tuples and potentially other formats
+            if isinstance(position, (list, tuple)) and len(position) >= 2:
+                x, y = position[0], position[1]
+                # theta is position[2] if available, but we don't need it for drawing the path
+                
                 pixel_x = int(x * self.SCREEN_WIDTH / self.width_meters + 
                             self.left_coordinate + self.SCREEN_WIDTH / 2)
                 pixel_y = int(y * self.SCREEN_HEIGHT / self.height_meters + 
                             self.SCREEN_HEIGHT / 2)
                 points.append((pixel_x, pixel_y))
+        
+        if len(points) > 1:
+            # Draw ground truth trajectory with distinct color and style
+            pygame.draw.lines(self.screen, self.MAGENTA, False, points, 3)
             
-            if len(points) > 1:
-                # Draw ground truth trajectory with distinct color and style
-                pygame.draw.lines(self.screen, self.MAGENTA, False, points, 3)
-                
-                # Draw waypoints on ground truth trajectory
-                for i, point in enumerate(points[::2]):  # Every other point to avoid clutter
-                    pygame.draw.circle(self.screen, self.MAGENTA, point, 4)
+            # Draw waypoints on ground truth trajectory
+            for i, point in enumerate(points[::2]):  # Every other point to avoid clutter
+                pygame.draw.circle(self.screen, self.MAGENTA, point, 4)
+            
+            # Draw direction indicators at some points to show calculated orientations
+            if len(self.metrics.ground_truth_trajectory) > 1:
+                for i in range(0, len(self.metrics.ground_truth_trajectory), 3):  # Every 3rd point
+                    if i < len(self.metrics.ground_truth_trajectory):
+                        x, y, theta = self.metrics.ground_truth_trajectory[i]
+                        
+                        # Calculate arrow end point
+                        arrow_length = 0.3  # 30cm arrow in meters
+                        end_x = x + arrow_length * math.cos(theta)
+                        end_y = y + arrow_length * math.sin(theta)
+                        
+                        # Convert to pixels
+                        start_pixel_x = int(x * self.SCREEN_WIDTH / self.width_meters + 
+                                          self.left_coordinate + self.SCREEN_WIDTH / 2)
+                        start_pixel_y = int(y * self.SCREEN_HEIGHT / self.height_meters + 
+                                          self.SCREEN_HEIGHT / 2)
+                        end_pixel_x = int(end_x * self.SCREEN_WIDTH / self.width_meters + 
+                                        self.left_coordinate + self.SCREEN_WIDTH / 2)
+                        end_pixel_y = int(end_y * self.SCREEN_HEIGHT / self.height_meters + 
+                                        self.SCREEN_HEIGHT / 2)
+                        
+                        # Draw orientation arrow
+                        pygame.draw.line(self.screen, self.MAGENTA, 
+                                       (start_pixel_x, start_pixel_y), 
+                                       (end_pixel_x, end_pixel_y), 2)
+                        
+                        # Draw arrowhead
+                        arrow_size = 8
+                        angle = theta
+                        arrowhead_points = [
+                            (end_pixel_x, end_pixel_y),
+                            (end_pixel_x - arrow_size * math.cos(angle - 0.5), 
+                             end_pixel_y - arrow_size * math.sin(angle - 0.5)),
+                            (end_pixel_x - arrow_size * math.cos(angle + 0.5), 
+                             end_pixel_y - arrow_size * math.sin(angle + 0.5))
+                        ]
+                        pygame.draw.polygon(self.screen, self.MAGENTA, arrowhead_points)
 
-    def draw_trajectory(self):
-        """Draw robot trajectory from metrics tracker."""
-        if len(self.metrics.robot_trajectory) > 1:
-            points = []
-            for x, y, _ in self.metrics.robot_trajectory:
+def draw_trajectory(self):
+    """Draw robot trajectory from metrics tracker."""
+    if len(self.metrics.robot_trajectory) > 1:
+        points = []
+        for position in self.metrics.robot_trajectory:
+            # Handle both (x, y, theta) tuples and potentially other formats
+            if isinstance(position, (list, tuple)) and len(position) >= 2:
+                x, y = position[0], position[1]
+                
                 pixel_x = int(x * self.SCREEN_WIDTH / self.width_meters + 
                             self.left_coordinate + self.SCREEN_WIDTH / 2)
                 pixel_y = int(y * self.SCREEN_HEIGHT / self.height_meters + 
                             self.SCREEN_HEIGHT / 2)
                 points.append((pixel_x, pixel_y))
+        
+        if len(points) > 1:
+            pygame.draw.lines(self.screen, self.CYAN, False, points, 2)
             
-            if len(points) > 1:
-                pygame.draw.lines(self.screen, self.CYAN, False, points, 2)
+            # Draw some direction indicators for the estimated trajectory too
+            if len(self.metrics.robot_trajectory) > 1:
+                for i in range(0, len(self.metrics.robot_trajectory), 5):  # Every 5th point
+                    if i < len(self.metrics.robot_trajectory):
+                        x, y, theta = self.metrics.robot_trajectory[i]
+                        
+                        # Calculate smaller arrow for estimated trajectory
+                        arrow_length = 0.2  # 20cm arrow in meters
+                        end_x = x + arrow_length * math.cos(theta)
+                        end_y = y + arrow_length * math.sin(theta)
+                        
+                        # Convert to pixels
+                        start_pixel_x = int(x * self.SCREEN_WIDTH / self.width_meters + 
+                                          self.left_coordinate + self.SCREEN_WIDTH / 2)
+                        start_pixel_y = int(y * self.SCREEN_HEIGHT / self.height_meters + 
+                                          self.SCREEN_HEIGHT / 2)
+                        end_pixel_x = int(end_x * self.SCREEN_WIDTH / self.width_meters + 
+                                        self.left_coordinate + self.SCREEN_WIDTH / 2)
+                        end_pixel_y = int(end_y * self.SCREEN_HEIGHT / self.height_meters + 
+                                        self.SCREEN_HEIGHT / 2)
+                        
+                        # Draw smaller orientation arrow
+                        pygame.draw.line(self.screen, self.CYAN, 
+                                       (start_pixel_x, start_pixel_y), 
+                                       (end_pixel_x, end_pixel_y), 1)
 
-    def draw_markers(self, marker_type, marker_data=None):
-        """Unified function to draw different types of markers."""
-        configs = {
-            'ground_truth': {
-                'color': self.ORANGE,
-                'shape': 'square',
-                'prefix': 'GT',
-                'data_source': self.metrics.ground_truth_markers,
-                'text_offset': (0, -20),
-                'draw_error': False
-            },
-            'estimated': {
-                'color': self.PURPLE,
-                'shape': 'circle',
-                'prefix': 'EST',
-                'data_source': None,
-                'text_offset': (0, 20),
-                'draw_error': True,
-                'error_color': self.RED,
-                'error_width': 1
-            },
-            'aligned': {
-                'color': self.LIME,
-                'shape': 'diamond',
-                'prefix': 'ALG',
-                'data_source': self.metrics.aligned_landmarks,
-                'text_offset': (15, 0),
-                'draw_error': True,
-                'error_color': self.LIME,
-                'error_width': 2
-            }
-        }
-        
-        if marker_type not in configs:
-            raise ValueError(f"Unknown marker type: {marker_type}")
-        
-        config = configs[marker_type]
-        
-        # Get data
-        if marker_data is not None:
-            data = marker_data
-        elif marker_type == 'estimated':
-            best_particle = self.get_best_particle()
-            data = {lid: (lm.x, lm.y) for lid, lm in best_particle.landmarks.items()}
-        else:
-            data = config['data_source']
-        
-        if not data:
-            return
-        
-        # Draw each marker
-        for marker_id, position in data.items():
-            marker_x, marker_y = position
-            
-            # Convert to pixel coordinates
-            pixel_x = int(marker_x * self.SCREEN_WIDTH / self.width_meters + 
-                        self.left_coordinate + self.SCREEN_WIDTH / 2)
-            pixel_y = int(marker_y * self.SCREEN_HEIGHT / self.height_meters + 
-                        self.SCREEN_HEIGHT / 2)
-            
-            # Draw shape
-            if config['shape'] == 'square':
-                pygame.draw.rect(self.screen, config['color'], 
-                            (pixel_x - 6, pixel_y - 6, 12, 12))
-            elif config['shape'] == 'circle':
-                pygame.draw.circle(self.screen, config['color'], (pixel_x, pixel_y), 5)
-            elif config['shape'] == 'diamond':
-                diamond_points = [
-                    (pixel_x, pixel_y - 6),
-                    (pixel_x + 6, pixel_y),
-                    (pixel_x, pixel_y + 6),
-                    (pixel_x - 6, pixel_y)
-                ]
-                pygame.draw.polygon(self.screen, config['color'], diamond_points)
-            
-            # Draw text
-            text_surface = self.small_font.render(f"{config['prefix']}{marker_id}", 
-                                                True, config['color'])
-            text_rect = text_surface.get_rect(
-                center=(pixel_x + config['text_offset'][0], 
-                    pixel_y + config['text_offset'][1])
-            )
-            self.screen.blit(text_surface, text_rect)
-            
-            # Draw error line if needed
-            if config['draw_error'] and marker_id in self.metrics.ground_truth_markers:
-                gt_x, gt_y = self.metrics.ground_truth_markers[marker_id]
-                gt_pixel_x = int(gt_x * self.SCREEN_WIDTH / self.width_meters + 
-                            self.left_coordinate + self.SCREEN_WIDTH / 2)
-                gt_pixel_y = int(gt_y * self.SCREEN_HEIGHT / self.height_meters + 
-                            self.SCREEN_HEIGHT / 2)
-                
-                pygame.draw.line(self.screen, config['error_color'], 
-                            (pixel_x, pixel_y), (gt_pixel_x, gt_pixel_y), 
-                            config['error_width'])
+def draw_enhanced_legend(self):
+    """Draw an enhanced legend explaining the colors and new metrics."""
+    legend_x = self.SCREEN_WIDTH - 280
+    legend_y = 10
+    
+    # Background
+    pygame.draw.rect(self.screen, (0, 0, 0, 128), (legend_x, legend_y, 260, 260))
+    pygame.draw.rect(self.screen, self.WHITE, (legend_x, legend_y, 260, 260), 1)
+    
+    y_pos = legend_y + 10
+    
+    # Title
+    title = self.font.render("Enhanced Legend:", True, self.WHITE)
+    self.screen.blit(title, (legend_x + 10, y_pos))
+    y_pos += 25
+    
+    # Legend items
+    legend_items = [
+        ("Ground Truth Markers", self.ORANGE),
+        ("Estimated Markers", self.PURPLE),
+        ("Kabsch Aligned", self.LIME),
+        ("Ground Truth Trajectory", self.MAGENTA),
+        ("Estimated Trajectory", self.CYAN),
+        ("Robot (Moving)", self.GREEN),
+        ("Robot (Stationary)", self.ORANGE),
+        ("Error Lines", self.RED)
+    ]
+    
+    for text, color in legend_items:
+        # Draw color indicator
+        pygame.draw.circle(self.screen, color, (legend_x + 15, y_pos + 8), 5)
+        # Draw text
+        text_surface = self.small_font.render(text, True, self.WHITE)
+        self.screen.blit(text_surface, (legend_x + 30, y_pos))
+        y_pos += 20
+    
+    # Add new metrics explanation
+    y_pos += 10
+    metrics_title = self.small_font.render("New Metrics:", True, self.YELLOW)
+    self.screen.blit(metrics_title, (legend_x + 10, y_pos))
+    y_pos += 18
+    
+    metric_explanations = [
+        "MSP: Mean Squared Position",
+        "ETA: Est. Trajectory Accuracy",
+        "→ : Calculated orientations",
+        "Auto θ: From movement direction"
+    ]
+    
+    for text in metric_explanations:
+        text_surface = self.small_font.render(text, True, self.WHITE)
+        self.screen.blit(text_surface, (legend_x + 15, y_pos))
+        y_pos += 16
 
-    def draw_metrics_panel(self):
-        """Draw performance metrics panel using enhanced metrics tracker."""
-        # Get current metrics
-        current_metrics = self.metrics.get_current_metrics()
-        diversity_stats = current_metrics['effective_particle_count']
-        timing_stats = current_metrics['timing_performance']
-        
-        panel_x = 10
-        panel_y = 10
-        panel_width = 520  # Increased width for new metrics
-        panel_height = 520  # Increased height
-        
-        # Draw background
-        pygame.draw.rect(self.screen, (0, 0, 0, 180), 
-                        (panel_x, panel_y, panel_width, panel_height))
-        pygame.draw.rect(self.screen, self.WHITE, 
-                        (panel_x, panel_y, panel_width, panel_height), 2)
-        
-        y_offset = panel_y + 10
-        
-        # Title
-        title = self.font.render("Enhanced SLAM Performance Metrics", True, self.WHITE)
-        self.screen.blit(title, (panel_x + 10, y_offset))
-        y_offset += 30
-        
-        # Robot status
-        status_color = self.GREEN if self.is_robot_moving else self.RED
-        status_text = "MOVING" if self.is_robot_moving else "STATIONARY"
-        robot_status = self.font.render(f"Robot Status: {status_text}", True, status_color)
-        self.screen.blit(robot_status, (panel_x + 10, y_offset))
-        y_offset += 25
-        
-        # Display enhanced trajectory metrics
-        trajectory_metrics = [
-            (f"MPD (ATE): {current_metrics['current_mpd']:.3f}m", self.WHITE),
-            (f"MSP: {current_metrics['current_msp']:.3f}m²", self.CYAN),
-            (f"ETA: {current_metrics['current_eta']:.1f}%", self.MAGENTA),
-            (f"RMSE: {current_metrics['current_rmse']:.3f}m", self.WHITE),
-            (f"Detection Rate: {current_metrics['detection_rate']:.1f}%", self.WHITE),
-        ]
-        
-        for text, color in trajectory_metrics:
-            text_surface = self.font.render(text, True, color)
-            self.screen.blit(text_surface, (panel_x + 10, y_offset))
-            y_offset += 20
-        
-        y_offset += 5
-        
-        # Trajectory Information Section
-        traj_title = self.font.render("Trajectory Information:", True, self.YELLOW)
-        self.screen.blit(traj_title, (panel_x + 10, y_offset))
+def draw_metrics_panel(self):
+    """Draw performance metrics panel using enhanced metrics tracker."""
+    # Get current metrics
+    current_metrics = self.metrics.get_current_metrics()
+    diversity_stats = current_metrics['effective_particle_count']
+    timing_stats = current_metrics['timing_performance']
+    
+    panel_x = 10
+    panel_y = 10
+    panel_width = 520  # Increased width for new metrics
+    panel_height = 580  # Increased height for trajectory info
+    
+    # Draw background
+    pygame.draw.rect(self.screen, (0, 0, 0, 180), 
+                    (panel_x, panel_y, panel_width, panel_height))
+    pygame.draw.rect(self.screen, self.WHITE, 
+                    (panel_x, panel_y, panel_width, panel_height), 2)
+    
+    y_offset = panel_y + 10
+    
+    # Title
+    title = self.font.render("Enhanced SLAM Performance Metrics", True, self.WHITE)
+    self.screen.blit(title, (panel_x + 10, y_offset))
+    y_offset += 30
+    
+    # Robot status
+    status_color = self.GREEN if self.is_robot_moving else self.RED
+    status_text = "MOVING" if self.is_robot_moving else "STATIONARY"
+    robot_status = self.font.render(f"Robot Status: {status_text}", True, status_color)
+    self.screen.blit(robot_status, (panel_x + 10, y_offset))
+    y_offset += 25
+    
+    # Display enhanced trajectory metrics
+    trajectory_metrics = [
+        (f"MPD (ATE): {current_metrics['current_mpd']:.3f}m", self.WHITE),
+        (f"MSP: {current_metrics['current_msp']:.3f}m²", self.CYAN),
+        (f"ETA: {current_metrics['current_eta']:.1f}%", self.MAGENTA),
+        (f"RMSE: {current_metrics['current_rmse']:.3f}m", self.WHITE),
+        (f"Detection Rate: {current_metrics['detection_rate']:.1f}%", self.WHITE),
+    ]
+    
+    for text, color in trajectory_metrics:
+        text_surface = self.font.render(text, True, color)
+        self.screen.blit(text_surface, (panel_x + 10, y_offset))
+        y_offset += 20
+    
+    y_offset += 5
+    
+    # Trajectory Information Section
+    traj_title = self.font.render("Trajectory Information:", True, self.YELLOW)
+    self.screen.blit(traj_title, (panel_x + 10, y_offset))
+    y_offset += 20
+    
+    traj_info = [
+        f"Estimated Points: {current_metrics['trajectory_length']}",
+        f"Ground Truth Points: {current_metrics['ground_truth_trajectory_length']}",
+        f"Avg MSP: {current_metrics['average_msp']:.3f}m²",
+        f"Avg ETA: {current_metrics['average_eta']:.1f}%"
+    ]
+    
+    for text in traj_info:
+        text_surface = self.font.render(text, True, self.WHITE)
+        self.screen.blit(text_surface, (panel_x + 20, y_offset))
+        y_offset += 18
+    
+    # Add theta calculation info
+    theta_info = self.font.render("θ calc: Auto from trajectory", True, self.CYAN)
+    self.screen.blit(theta_info, (panel_x + 20, y_offset))
+    y_offset += 25
+    
+    # Particle Diversity Section
+    diversity_title = self.font.render("Particle Diversity:", True, self.CYAN)
+    self.screen.blit(diversity_title, (panel_x + 10, y_offset))
+    y_offset += 20
+    
+    diversity_metrics = [
+        f"n_eff: {diversity_stats['current_n_eff']:.1f}/{self.num_particles}",
+        f"Diversity: {diversity_stats['n_eff_ratio']:.2%}",
+        f"Resample Freq: {diversity_stats['resampling_frequency']:.1f}%"
+    ]
+    
+    for text in diversity_metrics:
+        text_surface = self.font.render(text, True, self.WHITE)
+        self.screen.blit(text_surface, (panel_x + 20, y_offset))
+        y_offset += 18
+    
+    y_offset += 7
+    
+    # Computational Performance Section
+    if 'total_update' in timing_stats and timing_stats['total_update']['count'] > 0:
+        perf_title = self.font.render("Computational Performance:", True, self.YELLOW)
+        self.screen.blit(perf_title, (panel_x + 10, y_offset))
         y_offset += 20
         
-        traj_info = [
-            f"Estimated Points: {current_metrics['trajectory_length']}",
-            f"Ground Truth Points: {current_metrics['ground_truth_trajectory_length']}",
-            f"Avg MSP: {current_metrics['average_msp']:.3f}m²",
-            f"Avg ETA: {current_metrics['average_eta']:.1f}%"
+        perf_metrics = [
+            f"Total: {timing_stats['total_update']['mean']:.1f}ms",
+            f"Motion: {timing_stats['motion_update']['mean']:.1f}ms",
+            f"Landmarks: {timing_stats['landmark_update']['mean']:.1f}ms"
         ]
         
-        for text in traj_info:
+        for text in perf_metrics:
             text_surface = self.font.render(text, True, self.WHITE)
             self.screen.blit(text_surface, (panel_x + 20, y_offset))
             y_offset += 18
         
-        y_offset += 7
-        
-        # Particle Diversity Section
-        diversity_title = self.font.render("Particle Diversity:", True, self.CYAN)
-        self.screen.blit(diversity_title, (panel_x + 10, y_offset))
-        y_offset += 20
-        
-        diversity_metrics = [
-            f"n_eff: {diversity_stats['current_n_eff']:.1f}/{self.num_particles}",
-            f"Diversity: {diversity_stats['n_eff_ratio']:.2%}",
-            f"Resample Freq: {diversity_stats['resampling_frequency']:.1f}%"
-        ]
-        
-        for text in diversity_metrics:
-            text_surface = self.font.render(text, True, self.WHITE)
-            self.screen.blit(text_surface, (panel_x + 20, y_offset))
-            y_offset += 18
-        
-        y_offset += 7
-        
-        # Computational Performance Section
-        if 'total_update' in timing_stats and timing_stats['total_update']['count'] > 0:
-            perf_title = self.font.render("Computational Performance:", True, self.YELLOW)
-            self.screen.blit(perf_title, (panel_x + 10, y_offset))
-            y_offset += 20
-            
-            perf_metrics = [
-                f"Total: {timing_stats['total_update']['mean']:.1f}ms",
-                f"Motion: {timing_stats['motion_update']['mean']:.1f}ms",
-                f"Landmarks: {timing_stats['landmark_update']['mean']:.1f}ms"
+        # Real-time performance
+        rt = timing_stats.get('real_time_performance', {})
+        if rt:
+            rt_metrics = [
+                f"RT Factor: {rt.get('real_time_factor', 0):.2f}x",
+                f"Rate: {rt.get('actual_rate_hz', 0):.1f}Hz / 30Hz target"
             ]
             
-            for text in perf_metrics:
+            for text in rt_metrics:
                 text_surface = self.font.render(text, True, self.WHITE)
                 self.screen.blit(text_surface, (panel_x + 20, y_offset))
                 y_offset += 18
-            
-            # Real-time performance
-            rt = timing_stats.get('real_time_performance', {})
-            if rt:
-                rt_metrics = [
-                    f"RT Factor: {rt.get('real_time_factor', 0):.2f}x",
-                    f"Rate: {rt.get('actual_rate_hz', 0):.1f}Hz / 30Hz target"
-                ]
-                
-                for text in rt_metrics:
-                    text_surface = self.font.render(text, True, self.WHITE)
-                    self.screen.blit(text_surface, (panel_x + 20, y_offset))
-                    y_offset += 18
-        
-        y_offset += 7
-        
-        # Landmark Stability
-        stability_title = self.font.render("Landmark Stability:", True, self.GREEN)
-        self.screen.blit(stability_title, (panel_x + 10, y_offset))
-        y_offset += 20
-        
-        stability = current_metrics['landmark_stability']
-        stability_text = (f"Stable Landmarks: "
-                        f"{stability['stable_landmarks']}/{stability['total_landmarks']}")
-        text_surface = self.font.render(stability_text, True, self.WHITE)
-        self.screen.blit(text_surface, (panel_x + 20, y_offset))
-
+    
+    y_offset += 7
+    
+    # Landmark Stability
+    stability_title = self.font.render("Landmark Stability:", True, self.GREEN)
+    self.screen.blit(stability_title, (panel_x + 10, y_offset))
+    y_offset += 20
+    
+    stability = current_metrics['landmark_stability']
+    stability_text = (f"Stable Landmarks: "
+                    f"{stability['stable_landmarks']}/{stability['total_landmarks']}")
+    text_surface = self.font.render(stability_text, True, self.WHITE)
+    self.screen.blit(text_surface, (panel_x + 20, y_offset))
     def _process_unique_id_landmarks(self, unique_id_landmarks):
         """Process landmarks with unique IDs (correspondence problem)."""
         for landmark in unique_id_landmarks:

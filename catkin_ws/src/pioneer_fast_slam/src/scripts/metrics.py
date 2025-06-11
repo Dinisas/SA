@@ -11,7 +11,7 @@ from collections import defaultdict
 class SLAMMetricsTracker:
     """
     Comprehensive metrics tracking for FastSLAM implementation.
-    Enhanced with ground truth trajectory support and additional metrics.
+    Enhanced with ground truth trajectory support and automatic theta calculation.
     """
     
     def __init__(self, num_particles, groundtruth_file, expected_update_rate=10.0):
@@ -73,6 +73,82 @@ class SLAMMetricsTracker:
         # Trajectory interpolation for alignment
         self.trajectory_interpolator = None
     
+    def calculate_trajectory_orientation(self, positions):
+        """
+        Calculate orientation (theta) for trajectory positions based on movement direction.
+        
+        Args:
+            positions: List of [x, y] or [x, y, theta] positions
+            
+        Returns:
+            List of (x, y, theta) tuples with calculated orientations
+        """
+        if not positions or len(positions) < 1:
+            return []
+        
+        trajectory_with_theta = []
+        
+        for i, pos in enumerate(positions):
+            x, y = pos[0], pos[1]
+            
+            # If theta is already provided, use it
+            if len(pos) >= 3:
+                theta = pos[2]
+            else:
+                # Calculate theta from movement direction
+                if i == 0:
+                    # For the first point, look ahead to next point if available
+                    if len(positions) > 1:
+                        next_x, next_y = positions[1][0], positions[1][1]
+                        theta = math.atan2(next_y - y, next_x - x)
+                    else:
+                        theta = 0.0  # Default orientation if only one point
+                elif i == len(positions) - 1:
+                    # For the last point, use direction from previous point
+                    prev_x, prev_y = positions[i-1][0], positions[i-1][1]
+                    theta = math.atan2(y - prev_y, x - prev_x)
+                else:
+                    # For middle points, use average of incoming and outgoing directions
+                    prev_x, prev_y = positions[i-1][0], positions[i-1][1]
+                    next_x, next_y = positions[i+1][0], positions[i+1][1]
+                    
+                    # Direction from previous point
+                    theta_in = math.atan2(y - prev_y, x - prev_x)
+                    # Direction to next point
+                    theta_out = math.atan2(next_y - y, next_x - x)
+                    
+                    # Average the angles (handling angle wraparound)
+                    theta = self.average_angles(theta_in, theta_out)
+            
+            trajectory_with_theta.append((x, y, theta))
+        
+        return trajectory_with_theta
+    
+    def average_angles(self, angle1, angle2):
+        """
+        Calculate the average of two angles, handling wraparound properly.
+        
+        Args:
+            angle1, angle2: Angles in radians
+            
+        Returns:
+            Average angle in radians
+        """
+        # Convert to unit vectors and average
+        x = (math.cos(angle1) + math.cos(angle2)) / 2
+        y = (math.sin(angle1) + math.sin(angle2)) / 2
+        
+        # Convert back to angle
+        return math.atan2(y, x)
+    
+    def normalize_angle(self, angle):
+        """Normalize angle to [-pi, pi] range."""
+        while angle > math.pi:
+            angle -= 2 * math.pi
+        while angle < -math.pi:
+            angle += 2 * math.pi
+        return angle
+    
     def load_ground_truth_data(self):
         """Load ground truth marker positions and trajectory from YAML file."""
         try:     
@@ -82,29 +158,32 @@ class SLAMMetricsTracker:
             # Load markers
             if 'markers' in data:
                 for marker_id, coords in data['markers'].items():
-                    self.ground_truth_markers[str(marker_id)] = coords
+                    if isinstance(coords, (list, tuple)) and len(coords) >= 2:
+                        self.ground_truth_markers[str(marker_id)] = [coords[0], coords[1]]
                 rospy.loginfo(f"Loaded {len(self.ground_truth_markers)} ground truth markers")
             else:
                 rospy.logwarn("No 'markers' section found in ground truth YAML")
             
             # Load trajectory if available
             if 'positions' in data:
-                # Handle different trajectory formats
                 positions = data['positions']
                 if isinstance(positions, list):
-                    for pos in positions:
-                        if isinstance(pos, list) and len(pos) >= 2:
-                            # Add default orientation if not provided
-                            if len(pos) == 2:
-                                self.ground_truth_trajectory.append((pos[0], pos[1], 0.0))
-                            else:
-                                self.ground_truth_trajectory.append((pos[0], pos[1], pos[2]))
+                    # Process positions to ensure they have proper orientation
+                    self.ground_truth_trajectory = self.calculate_trajectory_orientation(positions)
+                    
                 rospy.loginfo(f"Loaded {len(self.ground_truth_trajectory)} ground truth trajectory points")
+                
+                # Log some trajectory information for debugging
+                if self.ground_truth_trajectory:
+                    rospy.loginfo("First few trajectory points:")
+                    for i, (x, y, theta) in enumerate(self.ground_truth_trajectory[:3]):
+                        rospy.loginfo(f"  Point {i}: x={x:.3f}, y={y:.3f}, θ={theta:.3f} ({math.degrees(theta):.1f}°)")
             else:
                 rospy.logwarn("No 'positions' section found in ground truth YAML")
                 
         except Exception as e:
             rospy.logerr(f"Error loading ground truth data: {e}")
+            rospy.logerr(f"File path: {self.groundtruth_file}")
     
     def update_robot_trajectory(self, x, y, theta):
         """Add a new pose to the robot trajectory."""
@@ -225,7 +304,7 @@ class SLAMMetricsTracker:
         # Extract coordinates
         gt_x = [pos[0] for pos in self.ground_truth_trajectory]
         gt_y = [pos[1] for pos in self.ground_truth_trajectory]
-        gt_theta = [pos[2] if len(pos) > 2 else 0.0 for pos in self.ground_truth_trajectory]
+        gt_theta = [pos[2] for pos in self.ground_truth_trajectory]
         
         # Interpolate
         interp_x = np.interp(est_params, gt_params, gt_x)
@@ -271,11 +350,7 @@ class SLAMMetricsTracker:
             position_errors.append(pos_error)
             
             # Orientation error (normalized)
-            theta_diff = est_theta - gt_theta
-            while theta_diff > math.pi:
-                theta_diff -= 2 * math.pi
-            while theta_diff < -math.pi:
-                theta_diff += 2 * math.pi
+            theta_diff = self.normalize_angle(est_theta - gt_theta)
             orientation_errors.append(abs(theta_diff))
         
         if position_errors:
@@ -634,6 +709,17 @@ class SLAMMetricsTracker:
                 f.write(f"Current ETA: {metrics['current_eta']:.2f}%\n")
                 f.write(f"Average ETA: {metrics['average_eta']:.2f}%\n\n")
                 
+                # Ground Truth Trajectory Information
+                f.write("GROUND TRUTH TRAJECTORY INFORMATION\n")
+                f.write("-" * 35 + "\n")
+                f.write(f"Ground Truth Points: {metrics['ground_truth_trajectory_length']}\n")
+                f.write(f"Estimated Points: {metrics['trajectory_length']}\n")
+                if self.ground_truth_trajectory:
+                    f.write("\nFirst few ground truth points (with calculated θ):\n")
+                    for i, (x, y, theta) in enumerate(self.ground_truth_trajectory[:5]):
+                        f.write(f"  Point {i}: x={x:.3f}, y={y:.3f}, θ={theta:.3f} ({math.degrees(theta):.1f}°)\n")
+                f.write("\n")
+                
                 # Mapping Accuracy
                 f.write("MAPPING ACCURACY (After Kabsch Alignment)\n")
                 f.write("-" * 45 + "\n")
@@ -647,12 +733,6 @@ class SLAMMetricsTracker:
                 f.write("-" * 20 + "\n")
                 f.write(f"Detection Rate: {metrics['detection_rate']:.1f}%\n")
                 f.write(f"Landmarks Detected: {metrics['landmarks_detected']}/{metrics['total_ground_truth']}\n\n")
-                
-                # Trajectory Information
-                f.write("TRAJECTORY INFORMATION\n")
-                f.write("-" * 21 + "\n")
-                f.write(f"Estimated Trajectory Length: {metrics['trajectory_length']} points\n")
-                f.write(f"Ground Truth Trajectory Length: {metrics['ground_truth_trajectory_length']} points\n\n")
                 
                 # Particle Filter Performance
                 f.write("PARTICLE FILTER PERFORMANCE\n")
