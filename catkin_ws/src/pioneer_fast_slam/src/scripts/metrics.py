@@ -11,7 +11,7 @@ from collections import defaultdict
 class SLAMMetricsTracker:
     """
     Comprehensive metrics tracking for FastSLAM implementation.
-    Enhanced with ground truth trajectory support and automatic theta calculation.
+    Enhanced with ground truth trajectory support, automatic theta calculation, and clockwise rotation support.
     """
     
     def __init__(self, num_particles, groundtruth_file, expected_update_rate=10.0):
@@ -31,6 +31,7 @@ class SLAMMetricsTracker:
         # Ground truth data
         self.ground_truth_markers = {}
         self.ground_truth_trajectory = []  # Ground truth robot trajectory
+        self.rotation_angle_degrees = 0.0  # Clockwise rotation angle from YAML
         self.load_ground_truth_data()
         
         # ATE and trajectory metrics
@@ -72,6 +73,80 @@ class SLAMMetricsTracker:
         
         # Trajectory interpolation for alignment
         self.trajectory_interpolator = None
+    
+    def apply_clockwise_rotation(self, points, angle_degrees):
+        """
+        Apply clockwise rotation to a list of points.
+        
+        Args:
+            points: List of [x, y] or [x, y, theta] points
+            angle_degrees: Clockwise rotation angle in degrees
+            
+        Returns:
+            List of rotated points maintaining original format
+        """
+        if angle_degrees == 0.0:
+            return points
+        
+        # Convert to radians (negative for clockwise)
+        angle_rad = -math.radians(angle_degrees)
+        
+        # Rotation matrix for clockwise rotation
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        
+        rotated_points = []
+        for point in points:
+            if isinstance(point, (list, tuple)) and len(point) >= 2:
+                x, y = point[0], point[1]
+                
+                # Apply rotation
+                new_x = x * cos_a - y * sin_a
+                new_y = x * sin_a + y * cos_a
+                
+                # Preserve original format
+                if len(point) >= 3:
+                    # If theta is present, rotate it too
+                    theta = point[2] + angle_rad
+                    rotated_points.append([new_x, new_y, theta])
+                else:
+                    rotated_points.append([new_x, new_y])
+            else:
+                # If point format is unexpected, keep as is
+                rotated_points.append(point)
+        
+        return rotated_points
+    
+    def apply_clockwise_rotation_to_markers(self, markers_dict, angle_degrees):
+        """
+        Apply clockwise rotation to marker positions.
+        
+        Args:
+            markers_dict: Dictionary of {id: [x, y]} marker positions
+            angle_degrees: Clockwise rotation angle in degrees
+            
+        Returns:
+            Dictionary with rotated marker positions
+        """
+        if angle_degrees == 0.0:
+            return markers_dict
+        
+        # Convert to radians (negative for clockwise)
+        angle_rad = -math.radians(angle_degrees)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        
+        rotated_markers = {}
+        for marker_id, pos in markers_dict.items():
+            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                x, y = pos[0], pos[1]
+                new_x = x * cos_a - y * sin_a
+                new_y = x * sin_a + y * cos_a
+                rotated_markers[marker_id] = [new_x, new_y]
+            else:
+                rotated_markers[marker_id] = pos
+        
+        return rotated_markers
     
     def calculate_trajectory_orientation(self, positions):
         """
@@ -150,16 +225,30 @@ class SLAMMetricsTracker:
         return angle
     
     def load_ground_truth_data(self):
-        """Load ground truth marker positions and trajectory from YAML file."""
+        """Load ground truth marker positions and trajectory from YAML file with rotation support."""
         try:     
             with open(self.groundtruth_file, 'r') as file:
                 data = yaml.safe_load(file)
             
+            # Check for clockwise rotation parameter
+            rotation_config = data.get('coordinate_transform', {})
+            self.rotation_angle_degrees = rotation_config.get('clockwise_rotation_degrees', 0.0)
+            
+            if self.rotation_angle_degrees != 0.0:
+                rospy.loginfo(f"Applying {self.rotation_angle_degrees}° clockwise rotation to ground truth data")
+            
             # Load markers
             if 'markers' in data:
+                raw_markers = {}
                 for marker_id, coords in data['markers'].items():
                     if isinstance(coords, (list, tuple)) and len(coords) >= 2:
-                        self.ground_truth_markers[str(marker_id)] = [coords[0], coords[1]]
+                        raw_markers[str(marker_id)] = [coords[0], coords[1]]
+                
+                # Apply rotation to markers if specified
+                self.ground_truth_markers = self.apply_clockwise_rotation_to_markers(
+                    raw_markers, self.rotation_angle_degrees
+                )
+                
                 rospy.loginfo(f"Loaded {len(self.ground_truth_markers)} ground truth markers")
             else:
                 rospy.logwarn("No 'markers' section found in ground truth YAML")
@@ -168,14 +257,20 @@ class SLAMMetricsTracker:
             if 'positions' in data:
                 positions = data['positions']
                 if isinstance(positions, list):
+                    # Apply rotation to trajectory if specified
+                    rotated_positions = self.apply_clockwise_rotation(positions, self.rotation_angle_degrees)
+                    
                     # Process positions to ensure they have proper orientation
-                    self.ground_truth_trajectory = self.calculate_trajectory_orientation(positions)
+                    self.ground_truth_trajectory = self.calculate_trajectory_orientation(rotated_positions)
                     
                 rospy.loginfo(f"Loaded {len(self.ground_truth_trajectory)} ground truth trajectory points")
                 
+                if self.rotation_angle_degrees != 0.0:
+                    rospy.loginfo(f"Applied {self.rotation_angle_degrees}° clockwise rotation to trajectory")
+                
                 # Log some trajectory information for debugging
                 if self.ground_truth_trajectory:
-                    rospy.loginfo("First few trajectory points:")
+                    rospy.loginfo("First few trajectory points (after rotation):")
                     for i, (x, y, theta) in enumerate(self.ground_truth_trajectory[:3]):
                         rospy.loginfo(f"  Point {i}: x={x:.3f}, y={y:.3f}, θ={theta:.3f} ({math.degrees(theta):.1f}°)")
             else:
@@ -679,6 +774,9 @@ class SLAMMetricsTracker:
             'ground_truth_trajectory_length': len(self.ground_truth_trajectory),
             'particles_count': self.num_particles,
             
+            # Coordinate transformation info
+            'rotation_applied_degrees': self.rotation_angle_degrees,
+            
             # Advanced metrics
             'effective_particle_count': diversity_stats,
             'timing_performance': timing_stats,
@@ -699,6 +797,12 @@ class SLAMMetricsTracker:
                 f.write("FastSLAM Comprehensive Performance Analysis\n")
                 f.write("=" * 60 + "\n\n")
                 
+                # Coordinate Transform Information
+                if self.rotation_angle_degrees != 0.0:
+                    f.write("COORDINATE TRANSFORMATION\n")
+                    f.write("-" * 30 + "\n")
+                    f.write(f"Clockwise Rotation Applied: {self.rotation_angle_degrees}°\n\n")
+                
                 # Trajectory Error Analysis
                 f.write("TRAJECTORY ERROR ANALYSIS\n")
                 f.write("-" * 30 + "\n")
@@ -715,7 +819,7 @@ class SLAMMetricsTracker:
                 f.write(f"Ground Truth Points: {metrics['ground_truth_trajectory_length']}\n")
                 f.write(f"Estimated Points: {metrics['trajectory_length']}\n")
                 if self.ground_truth_trajectory:
-                    f.write("\nFirst few ground truth points (with calculated θ):\n")
+                    f.write("\nFirst few ground truth points (after rotation if applied):\n")
                     for i, (x, y, theta) in enumerate(self.ground_truth_trajectory[:5]):
                         f.write(f"  Point {i}: x={x:.3f}, y={y:.3f}, θ={theta:.3f} ({math.degrees(theta):.1f}°)\n")
                 f.write("\n")
