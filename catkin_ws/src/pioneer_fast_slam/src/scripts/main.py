@@ -23,10 +23,10 @@ def set_slam_variables(particles, groundtruth_file, update_rate):
     
     # Tuning parameters - adjusted for better performance
     alphas = [
-        0.00008 * noise_scale,  # Rotation noise from rotation
-        0.00008 * noise_scale,  # Rotation noise from translation  
-        0.00001 * noise_scale,  # Translation noise from translation
-        0.00001 * noise_scale   # Translation noise from rotation
+        0.00004 * noise_scale,  # Rotation noise from rotation
+        0.00004 * noise_scale,  # Rotation noise from translation  
+        0.000005 * noise_scale,  # Translation noise from translation
+        0.000005 * noise_scale   # Translation noise from rotation
     ]
     
     tuning_option = [alphas]

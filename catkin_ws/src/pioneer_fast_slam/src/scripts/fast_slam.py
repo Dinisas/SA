@@ -20,7 +20,7 @@ class FastSlam:
         self.tuning_options = tuning_option
         self.SCREEN_WIDTH = window_size_pixel
         self.SCREEN_HEIGHT = window_size_pixel
-        self.metrics_update_interval = 25  # You can adjust this
+        self.metrics_update_interval = 30  # You can adjust this
 
         # Motion detection thresholds
         self.min_motion_threshold = {
