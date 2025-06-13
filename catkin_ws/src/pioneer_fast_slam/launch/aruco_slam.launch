@@ -5,7 +5,7 @@
   <arg name="particles" default="50" doc="Number of particles for FastSLAM Algorithm"/>
   <arg name="groundtruth" default="simulation3.yaml" doc="Ground truth file for evaluation"/>
   <arg name="update_rate" default="30" doc="Target update rate in Hz"/>
-  <arg name="playback_rate" default="1.0" doc="Rosbag playback rate"/>
+  <arg name="playback_rate" default="1" doc="Rosbag playback rate"/>
   
     <node pkg="pioneer_fast_slam" type="list_groundtruth.py" name="list_groundtruth" output="screen" />
 

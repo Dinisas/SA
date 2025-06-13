@@ -20,6 +20,7 @@ class FastSlam:
         self.tuning_options = tuning_option
         self.SCREEN_WIDTH = window_size_pixel
         self.SCREEN_HEIGHT = window_size_pixel
+        self.metrics_update_interval = 25  # You can adjust this
 
         # Motion detection thresholds
         self.min_motion_threshold = {
@@ -33,7 +34,8 @@ class FastSlam:
         self.last_odometry_update_time = time.time()
         self.last_measurement_update_time = time.time()
         self.min_time_between_updates = 0.033  # ~30Hz max update rate
-
+        self.clock = pygame.time.Clock()    # create PyGame clock
+        self.refresh_rate = 24  # refresh rate in seconds (1 second for simplicity)    
         # Set up the pygame screen
         if screen is None:
             pygame.init()
@@ -60,7 +62,7 @@ class FastSlam:
         self.CYAN = (0, 255, 255)
         self.LIME = (50, 205, 50)
         self.YELLOW = (255, 255, 0)
-        self.MAGENTA = (255, 0, 255)  # New color for ground truth trajectory
+        self.MAGENTA = (255, 0, 255)  # Color for ground truth trajectory
 
         # Screen and map dimensions
         self.screen = screen      
@@ -92,6 +94,10 @@ class FastSlam:
             'rotation1': 0.0,
             'rotation2': 0.0
         }
+        
+        # SLAM trajectory tracking for ATE calculation
+        self.best_particle_trajectory = []  # Store best particle poses over time
+        self.max_trajectory_length = 300   # Limit memory usage
         
         self.update_screen()
         return
@@ -200,6 +206,59 @@ class FastSlam:
                 self.is_robot_moving = False
             return False
     
+    def track_best_particle_pose(self):
+        """
+        Track the best particle's pose over time for accurate ATE calculation.
+        Call this after SLAM updates.
+        """
+        try:
+            if (self.best_particle_ID >= 0 and 
+                self.best_particle_ID < len(self.particles)):
+                
+                best_particle = self.particles[self.best_particle_ID]
+                x, y, theta = best_particle.pose
+                
+                # Store the current best particle pose
+                self.best_particle_trajectory.append((x, y, theta))
+                
+                # Limit trajectory size
+                if len(self.best_particle_trajectory) > self.max_trajectory_length:
+                    self.best_particle_trajectory.pop(0)
+
+                    
+                rospy.logdebug(f"Tracked best particle pose: ({x:.3f}, {y:.3f}, {theta:.3f})")
+                
+        except Exception as e:
+            rospy.logdebug(f"Error tracking best particle pose: {e}")
+
+    def get_slam_trajectory_for_ate(self):
+        """
+        Create a SLAM trajectory for ATE calculation.
+        This returns the best particle's trajectory which represents SLAM estimates.
+        
+        Returns:
+            List of (x, y, theta) tuples representing SLAM-estimated trajectory
+        """
+        try:
+            if hasattr(self, 'best_particle_trajectory') and self.best_particle_trajectory:
+                # Use explicitly tracked best particle trajectory
+                slam_trajectory = self.best_particle_trajectory.copy()
+                rospy.logdebug(f"Created SLAM trajectory with {len(slam_trajectory)} points for ATE calculation")
+                return slam_trajectory
+            else:
+                # Fallback to robot trajectory method (less accurate but still usable)
+                slam_trajectory = []
+                for pose in self.metrics.robot_trajectory:
+                    if isinstance(pose, (list, tuple)) and len(pose) >= 3:
+                        slam_trajectory.append((pose[0], pose[1], pose[2]))
+                
+                rospy.logdebug(f"Created fallback SLAM trajectory with {len(slam_trajectory)} points for ATE calculation")
+                return slam_trajectory
+                
+        except Exception as e:
+            rospy.logerr(f"Error creating SLAM trajectory for ATE: {e}")
+            return []
+    
     def update_odometry(self, odometry):
         """Update the particles based on odometry data with motion detection."""
         current_time = time.time()
@@ -260,8 +319,7 @@ class FastSlam:
 
     def compute_slam(self, landmarks_in_sight):
         """
-        Compute SLAM with support for both correspondence and non-correspondence problems.
-        Only processes when there are actual measurements.
+        Compute SLAM with FIXED ATE calculation (ETA removed).
         """
         if not landmarks_in_sight:
             return
@@ -311,15 +369,21 @@ class FastSlam:
                     # Update best particle without resampling
                     self.best_particle_ID = np.argmax(weights)
             
-            # Update metrics after resampling
+            # Track best particle pose always
+            self.track_best_particle_pose()
+
+            # Always compute landmark SSE (since it's fast)
             best_particle = self.get_best_particle()
-            
-            # Calculate ATE if trajectory exists
-            if hasattr(best_particle, 'trajectory') and best_particle.trajectory:
-                self.metrics.calculate_ate(best_particle.trajectory)
-            
-            # Calculate SSE metrics
             self.metrics.calculate_sse_metrics(best_particle.landmarks)
+
+            # Only calculate heavy metrics every N updates
+            if self.metrics.update_count % self.metrics_update_interval == 0:
+                slam_trajectory = self.get_slam_trajectory_for_ate()
+
+                if slam_trajectory and len(slam_trajectory) > 1:
+                    self.metrics.calculate_ate(slam_trajectory)
+                    self.metrics.calculate_msp()
+
             
             # Increment update count
             self.metrics.increment_update_count()
@@ -329,17 +393,16 @@ class FastSlam:
         self.update_screen(landmarks_in_sight)
 
     def _process_unique_id_landmarks(self, unique_id_landmarks):
-        """Process landmarks with unique IDs (correspondence problem)."""
+        """Process landmarks with unique IDs (correspondence problem solved)."""
         for landmark in unique_id_landmarks:
             landmark_dist, landmark_bearing_angle, landmark_id, marker_pixel_size = landmark
-            landmark_id_str = str(landmark_id)
             
-            # Each particle independently decides to create or update
+            # Process this landmark for all particles
             for particle in self.particles:
                 particle.handle_landmark_with_id(
                     landmark_dist, 
                     math.radians(landmark_bearing_angle), 
-                    landmark_id_str, 
+                    str(landmark_id), 
                     marker_pixel_size
                 )
 
@@ -466,7 +529,7 @@ class FastSlam:
                     
                     pixel_x = int(x * self.SCREEN_WIDTH / self.width_meters + 
                                 self.left_coordinate + self.SCREEN_WIDTH / 2)
-                    pixel_y = int(y * self.SCREEN_HEIGHT / self.height_meters + 
+                    pixel_y = int(-y * self.SCREEN_HEIGHT / self.height_meters + 
                                 self.SCREEN_HEIGHT / 2)
                     points.append((pixel_x, pixel_y))
             
@@ -510,13 +573,13 @@ class FastSlam:
                     pygame.draw.circle(self.screen, self.LIME, (pixel_x, pixel_y), 4)
 
     def draw_enhanced_legend(self):
-        """Draw an enhanced legend explaining the colors and new metrics."""
+        """Draw an enhanced legend explaining the colors and metrics (ETA removed)."""
         legend_x = self.SCREEN_WIDTH - 280
         legend_y = 10
         
         # Background
-        pygame.draw.rect(self.screen, (0, 0, 0, 128), (legend_x, legend_y, 260, 220))
-        pygame.draw.rect(self.screen, self.WHITE, (legend_x, legend_y, 260, 220), 1)
+        pygame.draw.rect(self.screen, (0, 0, 0, 128), (legend_x, legend_y, 260, 200))
+        pygame.draw.rect(self.screen, self.WHITE, (legend_x, legend_y, 260, 200), 1)
         
         y_pos = legend_y + 10
         
@@ -545,15 +608,15 @@ class FastSlam:
             self.screen.blit(text_surface, (legend_x + 30, y_pos))
             y_pos += 20
         
-        # Add new metrics explanation
+        # Add metrics explanation (ETA removed)
         y_pos += 10
-        metrics_title = self.small_font.render("New Metrics:", True, self.YELLOW)
+        metrics_title = self.small_font.render("Key Metrics:", True, self.YELLOW)
         self.screen.blit(metrics_title, (legend_x + 10, y_pos))
         y_pos += 18
         
         metric_explanations = [
-            "MSP: Mean Squared Position",
-            "ETA: Est. Trajectory Accuracy"
+            "ATE: SLAM vs Ground Truth",
+            "MSP: Mean Squared Position"
         ]
         
         for text in metric_explanations:
@@ -562,7 +625,7 @@ class FastSlam:
             y_pos += 16
 
     def draw_metrics_panel(self):
-        """Draw performance metrics panel using enhanced metrics tracker."""
+        """Draw performance metrics panel (ETA REMOVED)."""
         # Get current metrics
         current_metrics = self.metrics.get_current_metrics()
         diversity_stats = current_metrics['effective_particle_count']
@@ -570,8 +633,8 @@ class FastSlam:
         
         panel_x = 10
         panel_y = 10
-        panel_width = 520  # Increased width for new metrics
-        panel_height = 580  # Increased height for trajectory info
+        panel_width = 520
+        panel_height = 580
         
         # Draw background
         pygame.draw.rect(self.screen, (0, 0, 0, 180), 
@@ -593,11 +656,10 @@ class FastSlam:
         self.screen.blit(robot_status, (panel_x + 10, y_offset))
         y_offset += 25
         
-        # Display enhanced trajectory metrics
+        # Display trajectory metrics (FIXED ATE, REMOVED ETA)
         trajectory_metrics = [
-            (f"MPD (ATE): {current_metrics['current_mpd']:.3f}m", self.WHITE),
+            (f"ATE (SLAM vs GT): {current_metrics['current_mpd']:.3f}m", self.WHITE),
             (f"MSP: {current_metrics['current_msp']:.3f}m²", self.CYAN),
-            (f"ETA: {current_metrics['current_eta']:.1f}%", self.MAGENTA),
             (f"RMSE: {current_metrics['current_rmse']:.3f}m", self.WHITE),
             (f"Detection Rate: {current_metrics['detection_rate']:.1f}%", self.WHITE),
         ]
@@ -609,7 +671,7 @@ class FastSlam:
         
         y_offset += 5
         
-        # Trajectory Information Section
+        # Trajectory Information Section (REMOVE ETA)
         traj_title = self.font.render("Trajectory Information:", True, self.YELLOW)
         self.screen.blit(traj_title, (panel_x + 10, y_offset))
         y_offset += 20
@@ -617,8 +679,8 @@ class FastSlam:
         traj_info = [
             f"Estimated Points: {current_metrics['trajectory_length']}",
             f"Ground Truth Points: {current_metrics['ground_truth_trajectory_length']}",
-            f"Avg MSP: {current_metrics['average_msp']:.3f}m²",
-            f"Avg ETA: {current_metrics['average_eta']:.1f}%"
+            f"Avg ATE (SLAM vs GT): {current_metrics['average_mpd']:.3f}m",
+            f"Avg MSP: {current_metrics['average_msp']:.3f}m²"
         ]
         
         for text in traj_info:

@@ -6,12 +6,15 @@ import yaml
 import os
 import rospy
 from collections import defaultdict
+from scipy.spatial import KDTree
+
 
 
 class SLAMMetricsTracker:
     """
     Comprehensive metrics tracking for FastSLAM implementation.
-    Enhanced with ground truth trajectory support, automatic theta calculation, and clockwise rotation support.
+    Enhanced with ground truth trajectory support, automatic theta calculation.
+    ETA REMOVED, ATE FIXED to compare SLAM vs Ground Truth.
     """
     
     def __init__(self, num_particles, groundtruth_file, expected_update_rate=10.0):
@@ -34,10 +37,10 @@ class SLAMMetricsTracker:
         self.rotation_angle_degrees = 0.0  # Clockwise rotation angle from YAML
         self.load_ground_truth_data()
         
-        # ATE and trajectory metrics
+        # ATE and trajectory metrics (ETA REMOVED)
         self.ate_values = []
         self.msp_values = []  # Mean Squared Position error
-        self.eta_values = []  # Estimated Trajectory Accuracy
+        # REMOVED: self.eta_values = []  # ETA completely removed
         self.robot_trajectory = []
         
         # SSE and Kabsch alignment metrics
@@ -289,7 +292,7 @@ class SLAMMetricsTracker:
             self.calculate_trajectory_metrics()
     
     def calculate_trajectory_metrics(self):
-        """Calculate MSP and ETA metrics based on current trajectory."""
+        """Calculate MSP metrics based on current trajectory (ETA REMOVED)."""
         if not self.ground_truth_trajectory or not self.robot_trajectory:
             return
         
@@ -298,78 +301,28 @@ class SLAMMetricsTracker:
         if msp is not None:
             self.msp_values.append(msp)
         
-        # Calculate ETA (Estimated Trajectory Accuracy)
-        eta = self.calculate_eta()
-        if eta is not None:
-            self.eta_values.append(eta)
+        # REMOVED: ETA calculation completely deleted
     
     def calculate_msp(self):
-        """
-        Calculate Mean Squared Position error between estimated and ground truth trajectories.
-        
-        Returns:
-            MSP value or None if calculation not possible
-        """
-        if len(self.robot_trajectory) < 2 or len(self.ground_truth_trajectory) < 2:
+
+        if not self.robot_trajectory or not self.ground_truth_trajectory:
             return None
-        
-        # Align trajectories by length (take minimum length)
-        min_length = min(len(self.robot_trajectory), len(self.ground_truth_trajectory))
-        
+
+        # Extract positions only (ignore theta)
+        est_positions = np.array([(x, y) for x, y, _ in self.robot_trajectory])
+        gt_positions = np.array([(x, y) for x, y, _ in self.ground_truth_trajectory])
+
         total_squared_error = 0.0
-        valid_points = 0
-        
-        for i in range(min_length):
-            est_x, est_y, _ = self.robot_trajectory[i]
-            gt_x, gt_y, _ = self.ground_truth_trajectory[i]
-            
-            # Calculate squared Euclidean distance
-            squared_error = (est_x - gt_x)**2 + (est_y - gt_y)**2
-            total_squared_error += squared_error
-            valid_points += 1
-        
-        if valid_points > 0:
-            msp = total_squared_error / valid_points
-            return msp
-        
-        return None
-    
-    def calculate_eta(self):
-        """
-        Calculate Estimated Trajectory Accuracy (ETA).
-        ETA is defined as the percentage of trajectory points within acceptable error threshold.
-        
-        Returns:
-            ETA value (percentage) or None if calculation not possible
-        """
-        if len(self.robot_trajectory) < 2 or len(self.ground_truth_trajectory) < 2:
-            return None
-        
-        # Error threshold for considering a point "accurate" (in meters)
-        error_threshold = 0.5  # 50cm threshold
-        
-        min_length = min(len(self.robot_trajectory), len(self.ground_truth_trajectory))
-        
-        accurate_points = 0
-        total_points = 0
-        
-        for i in range(min_length):
-            est_x, est_y, _ = self.robot_trajectory[i]
-            gt_x, gt_y, _ = self.ground_truth_trajectory[i]
-            
-            # Calculate Euclidean distance
-            error = math.sqrt((est_x - gt_x)**2 + (est_y - gt_y)**2)
-            
-            if error <= error_threshold:
-                accurate_points += 1
-            
-            total_points += 1
-        
-        if total_points > 0:
-            eta = (accurate_points / total_points) * 100.0  # Convert to percentage
-            return eta
-        
-        return None
+
+        for est in est_positions:
+            # Compute Euclidean distances to all ground truth points
+            dists = np.linalg.norm(gt_positions - est, axis=1)
+            nearest_dist = np.min(dists)
+            total_squared_error += nearest_dist ** 2
+
+        msp = total_squared_error / len(est_positions)
+        return msp    
+    # REMOVED: calculate_eta() method completely deleted
     
     def interpolate_ground_truth_trajectory(self, estimated_trajectory):
         """
@@ -408,59 +361,6 @@ class SLAMMetricsTracker:
         
         # Return interpolated trajectory
         return [(x, y, theta) for x, y, theta in zip(interp_x, interp_y, interp_theta)]
-    
-    def calculate_advanced_trajectory_metrics(self, best_particle_trajectory):
-        """
-        Calculate advanced trajectory metrics using interpolated ground truth.
-        
-        Args:
-            best_particle_trajectory: Trajectory from the best particle
-            
-        Returns:
-            Dictionary containing advanced metrics
-        """
-        if not best_particle_trajectory or not self.ground_truth_trajectory:
-            return {}
-        
-        # Interpolate ground truth to match estimated trajectory length
-        interpolated_gt = self.interpolate_ground_truth_trajectory(best_particle_trajectory)
-        
-        if not interpolated_gt:
-            return {}
-        
-        metrics = {}
-        
-        # Calculate position errors
-        position_errors = []
-        orientation_errors = []
-        
-        min_length = min(len(best_particle_trajectory), len(interpolated_gt))
-        
-        for i in range(min_length):
-            est_x, est_y, est_theta = best_particle_trajectory[i]
-            gt_x, gt_y, gt_theta = interpolated_gt[i]
-            
-            # Position error
-            pos_error = math.sqrt((est_x - gt_x)**2 + (est_y - gt_y)**2)
-            position_errors.append(pos_error)
-            
-            # Orientation error (normalized)
-            theta_diff = self.normalize_angle(est_theta - gt_theta)
-            orientation_errors.append(abs(theta_diff))
-        
-        if position_errors:
-            metrics['advanced_msp'] = np.mean(np.array(position_errors)**2)
-            metrics['trajectory_rmse'] = np.sqrt(metrics['advanced_msp'])
-            metrics['max_position_error'] = max(position_errors)
-            metrics['min_position_error'] = min(position_errors)
-            metrics['std_position_error'] = np.std(position_errors)
-        
-        if orientation_errors:
-            metrics['mean_orientation_error'] = np.mean(orientation_errors)
-            metrics['max_orientation_error'] = max(orientation_errors)
-            metrics['std_orientation_error'] = np.std(orientation_errors)
-        
-        return metrics
     
     def record_timing(self, operation_name, duration):
         """Record timing for a specific operation."""
@@ -646,36 +546,26 @@ class SLAMMetricsTracker:
             'transformation': (R, t)
         }
     
-    def calculate_ate(self, best_particle_trajectory):
+    def calculate_ate(self, slam_trajectory):
         """
-        Calculate Absolute Trajectory Error.
-        
-        Args:
-            best_particle_trajectory: Trajectory from the best particle
-            
-        Returns:
-            ATE value
+        Fast ATE calculation using KDTree for nearest neighbor search.
         """
-        if len(self.robot_trajectory) < 2 or not best_particle_trajectory:
-            return 0.0
-        
-        total_error = 0.0
-        count = 0
-        min_len = min(len(self.robot_trajectory), len(best_particle_trajectory))
-        
-        for i in range(min_len):
-            true_x, true_y, _ = self.robot_trajectory[i]
-            est_x, est_y, _ = best_particle_trajectory[i]
-            
-            error = math.sqrt((true_x - est_x)**2 + (true_y - est_y)**2)
-            total_error += error**2
-            count += 1
-        
-        if count > 0:
-            ate = math.sqrt(total_error / count)
-            self.ate_values.append(ate)
-            return ate
-        return 0.0
+        if not slam_trajectory or not self.ground_truth_trajectory:
+            return None
+
+        est_positions = np.array([(x, y) for x, y, _ in slam_trajectory])
+        gt_positions = np.array([(x, y) for x, y, _ in self.ground_truth_trajectory])
+
+        # Build KDTree for ground truth
+        tree = KDTree(gt_positions)
+
+        # Query nearest neighbor for all estimated points
+        dists, _ = tree.query(est_positions, k=1)
+
+        ate = np.sqrt(np.mean(dists ** 2))
+
+        self.ate_values.append(ate)
+        return ate
     
     def get_timing_statistics(self):
         """Calculate timing statistics for performance analysis."""
@@ -742,20 +632,20 @@ class SLAMMetricsTracker:
         }
     
     def get_current_metrics(self):
-        """Return comprehensive performance metrics including new trajectory metrics."""
+        """Return comprehensive performance metrics (ETA REMOVED)."""
         timing_stats = self.get_timing_statistics()
         diversity_stats = self.get_particle_diversity_stats()
         
         metrics = {
-            # Trajectory error metrics
+            # Trajectory error metrics (ATE now correctly measures SLAM vs GT)
             'current_mpd': self.ate_values[-1] if self.ate_values else 0.0,
             'average_mpd': sum(self.ate_values) / len(self.ate_values) if self.ate_values else 0.0,
             
-            # NEW: MSP and ETA metrics
+            # MSP metrics (keep these)
             'current_msp': self.msp_values[-1] if self.msp_values else 0.0,
             'average_msp': sum(self.msp_values) / len(self.msp_values) if self.msp_values else 0.0,
-            'current_eta': self.eta_values[-1] if self.eta_values else 0.0,
-            'average_eta': sum(self.eta_values) / len(self.eta_values) if self.eta_values else 0.0,
+            
+            # REMOVED: All ETA metrics deleted
             
             # Mapping accuracy metrics
             'current_sse': self.sse_values[-1] if self.sse_values else 0.0,
@@ -790,7 +680,7 @@ class SLAMMetricsTracker:
         return metrics
     
     def save_metrics_to_file(self, filename="slam_comprehensive_metrics.txt"):
-        """Save comprehensive performance metrics to a file."""
+        """Save comprehensive performance metrics to a file (ETA REMOVED)."""
         try:
             metrics = self.get_current_metrics()
             with open(filename, 'w') as f:
@@ -803,15 +693,14 @@ class SLAMMetricsTracker:
                     f.write("-" * 30 + "\n")
                     f.write(f"Clockwise Rotation Applied: {self.rotation_angle_degrees}°\n\n")
                 
-                # Trajectory Error Analysis
+                # Trajectory Error Analysis (FIXED ATE)
                 f.write("TRAJECTORY ERROR ANALYSIS\n")
                 f.write("-" * 30 + "\n")
-                f.write(f"Current ATE: {metrics['current_mpd']:.6f} meters\n")
-                f.write(f"Average ATE: {metrics['average_mpd']:.6f} meters\n")
+                f.write(f"Current ATE (SLAM vs GT): {metrics['current_mpd']:.6f} meters\n")
+                f.write(f"Average ATE (SLAM vs GT): {metrics['average_mpd']:.6f} meters\n")
                 f.write(f"Current MSP: {metrics['current_msp']:.6f} m²\n")
-                f.write(f"Average MSP: {metrics['average_msp']:.6f} m²\n")
-                f.write(f"Current ETA: {metrics['current_eta']:.2f}%\n")
-                f.write(f"Average ETA: {metrics['average_eta']:.2f}%\n\n")
+                f.write(f"Average MSP: {metrics['average_msp']:.6f} m²\n\n")
+                # REMOVED: All ETA reporting deleted
                 
                 # Ground Truth Trajectory Information
                 f.write("GROUND TRUTH TRAJECTORY INFORMATION\n")
@@ -822,6 +711,8 @@ class SLAMMetricsTracker:
                     f.write("\nFirst few ground truth points (after rotation if applied):\n")
                     for i, (x, y, theta) in enumerate(self.ground_truth_trajectory[:5]):
                         f.write(f"  Point {i}: x={x:.3f}, y={y:.3f}, θ={theta:.3f} ({math.degrees(theta):.1f}°)\n")
+                else:
+                    f.write("No ground truth trajectory loaded!\n")
                 f.write("\n")
                 
                 # Mapping Accuracy
@@ -870,7 +761,7 @@ class SLAMMetricsTracker:
                         f.write(f"{stats['mean']:.2f} ± {stats['std']:.2f} ms\n")
                 f.write("\n")
                 
-                # Historical Data Summary
+                # Historical Data Summary (REMOVED ETA HISTORY)
                 if self.msp_values:
                     f.write("MSP History (last 10 values):\n")
                     recent_msp = self.msp_values[-10:]
@@ -879,14 +770,9 @@ class SLAMMetricsTracker:
                         f.write(f"  {idx}: {msp:.6f} m²\n")
                 f.write("\n")
                 
-                if self.eta_values:
-                    f.write("ETA History (last 10 values):\n")
-                    recent_eta = self.eta_values[-10:]
-                    for i, eta in enumerate(recent_eta):
-                        idx = len(self.eta_values) - len(recent_eta) + i + 1
-                        f.write(f"  {idx}: {eta:.2f}%\n")
+                # REMOVED: ETA history section completely deleted
                         
-            rospy.loginfo(f"Enhanced metrics saved to {filename}")
+            rospy.loginfo(f"Enhanced metrics saved successfully to {filename}")
         except Exception as e:
             rospy.logerr(f"Error saving metrics: {e}")
 
