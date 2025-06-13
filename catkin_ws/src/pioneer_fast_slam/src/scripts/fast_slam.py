@@ -34,8 +34,10 @@ class FastSlam:
         self.last_odometry_update_time = time.time()
         self.last_measurement_update_time = time.time()
         self.min_time_between_updates = 0.033  # ~30Hz max update rate
-        self.clock = pygame.time.Clock()    # create PyGame clock
-        self.refresh_rate = 24  # refresh rate in seconds (1 second for simplicity)    
+# Decouple rendering from SLAM loop:
+        self.render_interval = 0.1  # Render every 100ms (10 FPS)
+        self.next_render_time = time.time() + self.render_interval
+ 
         # Set up the pygame screen
         if screen is None:
             pygame.init()
@@ -99,7 +101,12 @@ class FastSlam:
         self.best_particle_trajectory = []  # Store best particle poses over time
         self.max_trajectory_length = 300   # Limit memory usage
         
-        self.update_screen()
+        # Decoupled rendering also on odometry
+        current_time = time.time()
+        if current_time >= self.next_render_time:
+            self.update_screen()
+            self.next_render_time = current_time + self.render_interval
+
         return
     
     def publish_landmarks(self):
@@ -390,7 +397,11 @@ class FastSlam:
             self.last_measurement_update_time = current_time
         
         # Update visualization
-        self.update_screen(landmarks_in_sight)
+# Decoupled rendering
+            current_time = time.time()
+            if current_time >= self.next_render_time:
+                self.update_screen(landmarks_in_sight)
+                self.next_render_time = current_time + self.render_interval
 
     def _process_unique_id_landmarks(self, unique_id_landmarks):
         """Process landmarks with unique IDs (correspondence problem solved)."""
